@@ -158,21 +158,35 @@ async def get_scan(scan_id: str) -> dict[str, Any] | None:
         return scan
 
 
-async def get_scan_history(input_str: str, limit: int = 50) -> list[dict[str, Any]]:
-    """Return the most recent scans for the given *input_str*.
+async def get_scan_history(
+    input_str: str | None = None, limit: int = 20
+) -> list[dict[str, Any]]:
+    """Return the most recent scans, optionally filtered by *input_str*.
+
+    Each returned dict includes a ``finding_count`` key with the number of
+    findings associated with that scan.
 
     Args:
-        input_str: The target string to filter by.
+        input_str: When provided, only scans with this target string are
+            returned.  When ``None``, all scans are considered.
         limit: Maximum number of records to return.
 
     Returns:
         List of scan metadata dicts ordered newest-first.
     """
+    _select = (
+        "SELECT s.id, s.input_str, s.status, s.risk_score, s.created_at, "
+        "COUNT(f.id) AS finding_count "
+        "FROM scans s LEFT JOIN findings f ON f.scan_id = s.id "
+    )
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT * FROM scans WHERE input_str=? ORDER BY created_at DESC LIMIT ?",
-            (input_str, limit),
-        ) as cursor:
+        if input_str is not None:
+            query = _select + "WHERE s.input_str=? GROUP BY s.id ORDER BY s.created_at DESC LIMIT ?"
+            params: tuple[Any, ...] = (input_str, limit)
+        else:
+            query = _select + "GROUP BY s.id ORDER BY s.created_at DESC LIMIT ?"
+            params = (limit,)
+        async with db.execute(query, params) as cursor:
             rows = await cursor.fetchall()
     return [dict(r) for r in rows]
