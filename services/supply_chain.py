@@ -370,7 +370,7 @@ async def check_osv(
         for s in v.get("severity", []):
             if s.get("type") == "CVSS_V3":
                 try:
-                    score = float(s["score"].split("/")[0])
+                    score = float(str(s["score"]).split("/")[0])
                     if score >= 9.0:
                         severity = SeverityLevel.CRITICAL
                     elif score >= 7.0:

@@ -7,7 +7,6 @@ import os
 import tempfile
 
 import pytest
-import pytest_asyncio
 
 
 @pytest.mark.asyncio
@@ -74,11 +73,7 @@ async def test_malwarebazaar_hit(httpx_mock) -> None:
 async def test_virustotal_skips_without_key(monkeypatch) -> None:
     """check_virustotal_hash returns empty list when VT key is not set."""
     monkeypatch.delenv("VIRUSTOTAL_API_KEY", raising=False)
-    # Reload the module so the module-level VT_KEY picks up the env change.
-    import importlib
-    import services.file_scanner as fs_mod
+    from services.file_scanner import check_virustotal_hash
 
-    importlib.reload(fs_mod)
-
-    result = await fs_mod.check_virustotal_hash("abc123")
+    result = await check_virustotal_hash("abc123")
     assert result == []

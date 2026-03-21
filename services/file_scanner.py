@@ -17,7 +17,7 @@ MB_BASE: str = "https://mb-api.abuse.ch/api/v1/"
 
 
 async def compute_sha256(file_path: str) -> str:
-    """Compute the SHA-256 hash of a file.
+    """Compute the SHA-256 hash of a file using chunked reading.
 
     Args:
         file_path: Absolute path to the file.
@@ -25,8 +25,11 @@ async def compute_sha256(file_path: str) -> str:
     Returns:
         Lowercase hexadecimal SHA-256 digest string.
     """
+    h = hashlib.sha256()
     with open(file_path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 async def check_malwarebazaar(sha256: str) -> List[ScanFinding]:
@@ -72,12 +75,13 @@ async def check_virustotal_hash(sha256: str) -> List[ScanFinding]:
         A list with a finding when detections are reported, empty otherwise.
         Returns an empty list immediately when ``VIRUSTOTAL_API_KEY`` is not set.
     """
-    if not VT_KEY:
+    vt_key = os.getenv("VIRUSTOTAL_API_KEY", "")
+    if not vt_key:
         return []
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.get(
             f"{VT_BASE}/files/{sha256}",
-            headers={"x-apikey": VT_KEY},
+            headers={"x-apikey": vt_key},
         )
     if r.status_code == 404:
         return []  # Unknown to VT — not necessarily clean
@@ -118,13 +122,14 @@ async def submit_file_virustotal(file_path: str) -> List[ScanFinding]:
         empty otherwise. Returns immediately when ``VIRUSTOTAL_API_KEY``
         is not set.
     """
-    if not VT_KEY:
+    vt_key = os.getenv("VIRUSTOTAL_API_KEY", "")
+    if not vt_key:
         return []
     async with httpx.AsyncClient(timeout=30) as client:
         with open(file_path, "rb") as f:
             r = await client.post(
                 f"{VT_BASE}/files",
-                headers={"x-apikey": VT_KEY},
+                headers={"x-apikey": vt_key},
                 files={"file": f},
             )
     if r.status_code not in (200, 201):
@@ -136,7 +141,7 @@ async def submit_file_virustotal(file_path: str) -> List[ScanFinding]:
         async with httpx.AsyncClient(timeout=10) as client:
             r2 = await client.get(
                 f"{VT_BASE}/analyses/{analysis_id}",
-                headers={"x-apikey": VT_KEY},
+                headers={"x-apikey": vt_key},
             )
         result = r2.json()["data"]
         if result["attributes"]["status"] == "completed":
