@@ -70,3 +70,24 @@ def test_scan_finding_schema():
         description="A test finding",
     )
     assert finding.fp_score == 0.5
+
+
+@pytest.mark.asyncio
+async def test_serve_frontend():
+    """GET / returns 200 (FileResponse for the web dashboard)."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get("/")
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_history_endpoint():
+    """GET /scan/history returns 200 and a list."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get("/scan/history")
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
