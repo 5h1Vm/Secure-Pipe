@@ -13,11 +13,16 @@ from schemas.finding import ScanFinding, SeverityLevel
 
 logger = logging.getLogger(__name__)
 
+OLLAMA_HOST: str = os.getenv("OLLAMA_HOST", "")
+OLLAMA_PORT: str = os.getenv("OLLAMA_PORT", "11434")
+OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.2")
+
 MODEL_ROUTING: dict[str, tuple[str, str]] = {
     "code_vulnerability": ("groq", "deepseek-r1-distill-llama-70b"),
     "secret_exposure": ("groq", "llama-3.3-70b-versatile"),
     "injection": ("groq", "deepseek-r1-distill-llama-70b"),
     "default": ("groq", "llama-3.3-70b-versatile"),
+    "ollama_fallback": ("ollama", OLLAMA_MODEL),
 }
 
 MODEL_WEIGHTS: dict[str, float] = {
@@ -58,10 +63,12 @@ class TriageResult:
 
 
 async def triage_finding(finding: ScanFinding) -> TriageResult:
-    """Triage a single finding using the Groq AI API.
+    """Triage a single finding using an available AI API.
 
-    Falls back to a default result when ``GROQ_API_KEY`` is not set or the
-    API call / JSON parsing fails.
+    Priority order: ``GROQ_API_KEY`` → ``OLLAMA_HOST`` → return defaults.
+
+    Falls back to a default result when neither ``GROQ_API_KEY`` nor
+    ``OLLAMA_HOST`` is set, or when the API call / JSON parsing fails.
 
     Args:
         finding: The scan finding to triage.
@@ -70,11 +77,13 @@ async def triage_finding(finding: ScanFinding) -> TriageResult:
         A :class:`TriageResult` populated from the AI response.
     """
     api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
+    ollama_host = os.getenv("OLLAMA_HOST", "")
+
+    if not api_key and not ollama_host:
         return TriageResult(
             severity_score=5.0,
             fp_probability=0.5,
-            remediation="Set GROQ_API_KEY for AI triage",
+            remediation="Set GROQ_API_KEY or OLLAMA_HOST for AI triage",
             confidence="LOW",
             model_used="none",
         )
@@ -93,19 +102,39 @@ async def triage_finding(finding: ScanFinding) -> TriageResult:
 
     model_name = "unknown"
     try:
-        category = get_finding_category(finding)
-        _, model_name = MODEL_ROUTING[category]
-        from groq import AsyncGroq
+        if api_key:
+            # Use Groq
+            category = get_finding_category(finding)
+            _, model_name = MODEL_ROUTING[category]
+            from groq import AsyncGroq
 
-        client = AsyncGroq(api_key=api_key)
-        response = await client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-        )
-        content = response.choices[0].message.content or ""
+            client = AsyncGroq(api_key=api_key)
+            response = await client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+            )
+            content = response.choices[0].message.content or ""
+        else:
+            # Use Ollama via OpenAI-compatible API
+            model_name = f"ollama/{OLLAMA_MODEL}"
+            import openai
+
+            ollama_client = openai.AsyncOpenAI(
+                base_url=f"http://{ollama_host}:{OLLAMA_PORT}/v1",
+                api_key="ollama",  # Required by SDK but ignored by Ollama
+            )
+            response = await ollama_client.chat.completions.create(
+                model=OLLAMA_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+            )
+            content = response.choices[0].message.content or ""
+
         data = json.loads(content)
         return TriageResult(
             severity_score=float(data.get("severity_score", 5.0)),

@@ -14,6 +14,8 @@ from schemas.finding import ScanFinding, SeverityLevel
 
 logger = logging.getLogger(__name__)
 
+OSV_API: str = "https://api.osv.dev/v1/query"
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -319,4 +321,93 @@ def check_slopsquat(package_names: List[str]) -> List[ScanFinding]:
                 )
                 break  # one finding per package is enough
 
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# OSV.dev CVE lookup
+# ---------------------------------------------------------------------------
+
+
+async def check_osv(
+    package_name: str,
+    version: str | None,
+    ecosystem: str = "PyPI",
+) -> List[ScanFinding]:
+    """Query OSV.dev for known CVEs — free, unlimited, no auth.
+
+    Args:
+        package_name: Name of the package to query.
+        version: Optional specific version string.
+        ecosystem: Package ecosystem (default ``"PyPI"``).
+
+    Returns:
+        Up to five :class:`~schemas.finding.ScanFinding` for known
+        vulnerabilities, or an empty list when none are found.
+    """
+    payload: dict = {"package": {"name": package_name, "ecosystem": ecosystem}}
+    if version:
+        payload["version"] = version
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(OSV_API, json=payload)
+        if r.status_code != 200:
+            return []
+    except Exception:
+        logger.debug("OSV lookup failed for %s", package_name)
+        return []
+
+    vulns = r.json().get("vulns", [])
+    findings: list[ScanFinding] = []
+    for v in vulns[:5]:  # cap at 5 per package to avoid noise
+        severity = SeverityLevel.HIGH
+        aliases = v.get("aliases", [])
+        cve_id = next(
+            (a for a in aliases if a.startswith("CVE-")),
+            v.get("id", "OSV"),
+        )
+        # Check CVSS score if available
+        for s in v.get("severity", []):
+            if s.get("type") == "CVSS_V3":
+                try:
+                    score = float(s["score"].split("/")[0])
+                    if score >= 9.0:
+                        severity = SeverityLevel.CRITICAL
+                    elif score >= 7.0:
+                        severity = SeverityLevel.HIGH
+                    else:
+                        severity = SeverityLevel.MEDIUM
+                except (ValueError, IndexError):
+                    pass
+        findings.append(ScanFinding(
+            tool="osv_dev",
+            severity=severity,
+            cwe=cve_id,
+            title=f"{package_name}: {cve_id}",
+            description=v.get("summary", "Known vulnerability"),
+            evidence=f"Ecosystem: {ecosystem}, Package: {package_name}",
+            file_path=f"supply_chain://{package_name}",
+        ))
+    return findings
+
+
+async def check_all_osv(project_path: str) -> List[ScanFinding]:
+    """Run OSV check on all packages in requirements.txt.
+
+    Args:
+        project_path: Root directory of the project.
+
+    Returns:
+        Combined list of :class:`~schemas.finding.ScanFinding` from
+        OSV.dev for all discovered packages.
+    """
+    findings: list[ScanFinding] = []
+    req_file = os.path.join(project_path, "requirements.txt")
+    if os.path.exists(req_file):
+        packages = _parse_requirements_txt(req_file)
+        tasks = [check_osv(pkg, None, "PyPI") for pkg in packages]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for r in results:
+            if isinstance(r, list):
+                findings.extend(r)
     return findings

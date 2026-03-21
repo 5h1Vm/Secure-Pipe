@@ -262,7 +262,23 @@
       text-align: right;
     }
 
-    /* ── Error banner ────────────────────────────────────── */
+    /* ── Log terminal ────────────────────────────────────── */
+    #log-terminal {
+      display: none;
+      margin-top: 1rem;
+      background: #0a1628;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 0.8rem;
+      color: #4ade80;
+      max-height: 220px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    #log-terminal .log-line { display: block; line-height: 1.5; }
     #error-banner {
       display: none;
       background: rgba(239,68,68,0.1);
@@ -300,6 +316,7 @@
       <div class="progress-bar-fill"></div>
     </div>
     <div id="progress-status">Initialising…</div>
+    <div id="log-terminal"></div>
   </div>
 
   <!-- Results -->
@@ -325,6 +342,7 @@
   const API_BASE = "";
 
   let _pollTimer = null;
+  let _logsWs = null;
 
   // ── Helpers ────────────────────────────────────────────
 
@@ -351,6 +369,46 @@
   }
   function hideProgress() {
     document.getElementById("progress-section").style.display = "none";
+    const logEl = document.getElementById("log-terminal");
+    logEl.style.display = "none";
+    logEl.innerHTML = "";
+  }
+
+  // ── Log terminal ───────────────────────────────────────
+
+  function openLogStream(scanId) {
+    if (_logsWs) {
+      try { _logsWs.close(); } catch (_) {}
+      _logsWs = null;
+    }
+    const logEl = document.getElementById("log-terminal");
+    logEl.style.display = "block";
+    logEl.innerHTML = "";
+
+    const wsProto = location.protocol === "https:" ? "wss" : "ws";
+    const wsHost = location.host || "localhost:8000";
+    _logsWs = new WebSocket(`${wsProto}://${wsHost}/scan/${scanId}/logs`);
+
+    _logsWs.onmessage = (evt) => {
+      const line = document.createElement("span");
+      line.className = "log-line";
+      line.textContent = evt.data;
+      logEl.appendChild(line);
+      logEl.scrollTop = logEl.scrollHeight;
+    };
+    _logsWs.onerror = () => {
+      _logsWs = null;
+    };
+    _logsWs.onclose = () => {
+      _logsWs = null;
+    };
+  }
+
+  function closeLogStream() {
+    if (_logsWs) {
+      try { _logsWs.close(); } catch (_) {}
+      _logsWs = null;
+    }
   }
 
   function statusLabel(status) {
@@ -378,6 +436,7 @@
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       pollScan(data.scan_id);
+      openLogStream(data.scan_id);
     } catch (err) {
       hideProgress();
       showError(`Scan failed: ${err.message}`);
@@ -405,6 +464,7 @@
           clearInterval(_pollTimer);
           _pollTimer = null;
           hideProgress();
+          closeLogStream();
           document.getElementById("scan-btn").disabled = false;
 
           if (data.status === "complete") {
@@ -418,6 +478,7 @@
         clearInterval(_pollTimer);
         _pollTimer = null;
         hideProgress();
+        closeLogStream();
         showError(`Polling error: ${err.message}`);
         document.getElementById("scan-btn").disabled = false;
       }
@@ -527,8 +588,8 @@
     }
     container.innerHTML = items.map(item => {
       const score = item.risk_score;
-      return `<div class="history-card" onclick="loadReport('${esc(item.scan_id)}')">
-        <span class="hc-target" title="${esc(item.input_str || "")}">${esc(item.input_str || item.scan_id)}</span>
+      return `<div class="history-card" onclick="loadReport('${esc(item.id)}')">
+        <span class="hc-target" title="${esc(item.input_str || "")}">${esc(item.input_str || item.id)}</span>
         <span class="hc-meta">${esc(item.status || "")}</span>
         <span class="hc-score" style="color:${scoreColor(score)}">${score !== null && score !== undefined ? score : "—"}</span>
       </div>`;
