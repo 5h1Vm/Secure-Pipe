@@ -85,7 +85,12 @@ async def update_scan_status(
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "UPDATE scans SET status=?, risk_score=?, completed_at=? WHERE id=?",
-            (status, risk_score, now if status == "complete" else None, scan_id),
+            (
+                status,
+                risk_score,
+                now if status in ("complete", "failed") else None,
+                scan_id,
+            ),
         )
         await db.commit()
 

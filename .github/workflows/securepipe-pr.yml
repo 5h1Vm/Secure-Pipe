@@ -1,0 +1,143 @@
+name: SecurePipe Security Scan
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  security-scan:
+    name: SAST Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install semgrep and bandit
+        run: pip install semgrep bandit
+
+      - name: Install gitleaks
+        run: |
+          GITLEAKS_VERSION="8.18.4"
+          curl -sSfL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            -o /tmp/gitleaks.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Run semgrep
+        run: |
+          semgrep --config=p/python --config=p/security-audit \
+            --json . > /tmp/semgrep.json || true
+
+      - name: Run bandit
+        run: |
+          bandit -r . -f json -o /tmp/bandit.json --exit-zero
+
+      - name: Parse results and build comment
+        id: parse
+        run: |
+          python3 - <<'EOF'
+          import json, os, sys
+
+          counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+
+          # --- semgrep ---
+          try:
+              with open("/tmp/semgrep.json") as f:
+                  semgrep_data = json.load(f)
+              for result in semgrep_data.get("results", []):
+                  sev = result.get("extra", {}).get("severity", "").upper()
+                  if sev == "ERROR":
+                      counts["CRITICAL"] += 1
+                  elif sev == "WARNING":
+                      counts["HIGH"] += 1
+                  elif sev == "INFO":
+                      counts["LOW"] += 1
+          except Exception as e:
+              print(f"Warning: could not parse semgrep output: {e}", file=sys.stderr)
+
+          # --- bandit ---
+          try:
+              with open("/tmp/bandit.json") as f:
+                  bandit_data = json.load(f)
+              for result in bandit_data.get("results", []):
+                  sev = result.get("issue_severity", "").upper()
+                  if sev in counts:
+                      counts[sev] += 1
+          except Exception as e:
+              print(f"Warning: could not parse bandit output: {e}", file=sys.stderr)
+
+          overall = "PASS ✅" if counts["CRITICAL"] == 0 else "BLOCK 🚫"
+
+          comment = f"""## SecurePipe Security Scan Results
+
+          | Severity | Count |
+          |----------|-------|
+          | 🔴 CRITICAL | {counts['CRITICAL']} |
+          | 🟠 HIGH | {counts['HIGH']} |
+          | 🟡 MEDIUM | {counts['MEDIUM']} |
+          | 🟢 LOW | {counts['LOW']} |
+
+          **Overall: {overall}**
+          """
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              # Write multi-line output using delimiter syntax
+              fh.write("comment<<COMMENT_EOF\n")
+              fh.write(comment + "\n")
+              fh.write("COMMENT_EOF\n")
+              fh.write(f"critical_count={counts['CRITICAL']}\n")
+
+          print(comment)
+          EOF
+
+      - name: Post PR comment
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr comment "${{ github.event.pull_request.number }}" \
+            --body "${{ steps.parse.outputs.comment }}" \
+            --repo "${{ github.repository }}"
+
+      - name: Fail if CRITICAL findings exist
+        if: steps.parse.outputs.critical_count != '0'
+        run: |
+          echo "CRITICAL findings found — blocking PR."
+          exit 1
+
+  tests:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run pytest
+        run: pytest tests/ -v

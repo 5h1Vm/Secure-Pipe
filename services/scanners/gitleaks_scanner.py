@@ -64,13 +64,14 @@ class GitleaksScanner(BaseScanner):
         for item in data:
             raw_secret: str = item.get("Secret", "") or ""
             truncated = raw_secret[:20] + "***" if raw_secret else None
+            description: str = item.get("Description", "")
 
             findings.append(
                 ScanFinding(
                     tool=self.scanner_name,
-                    severity=SeverityLevel.HIGH,
-                    title=item.get("Description", "Secret detected"),
-                    description=item.get("Description", ""),
+                    severity=self._map_severity(description),
+                    title=description or "Secret detected",
+                    description=description,
                     file_path=item.get("File"),
                     line_number=item.get("StartLine"),
                     evidence=truncated,
@@ -79,3 +80,28 @@ class GitleaksScanner(BaseScanner):
             )
 
         return findings
+
+    @staticmethod
+    def _map_severity(description: str) -> SeverityLevel:
+        """Map a secret description to a :class:`SeverityLevel`.
+
+        Args:
+            description: The human-readable description from gitleaks output.
+
+        Returns:
+            ``CRITICAL`` if the description contains a high-risk keyword
+            (``aws``, ``private key``, ``password``, ``secret``, ``token``,
+            or ``credential``); ``HIGH`` otherwise.
+        """
+        desc_lower = description.lower()
+        critical_keywords = (
+            "aws",
+            "private key",
+            "password",
+            "secret",
+            "token",
+            "credential",
+        )
+        if any(kw in desc_lower for kw in critical_keywords):
+            return SeverityLevel.CRITICAL
+        return SeverityLevel.HIGH
