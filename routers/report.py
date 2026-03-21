@@ -67,6 +67,7 @@ async def get_report(scan_id: str) -> dict[str, Any]:
         "input_type": record.get("input_type"),
         "status": record["status"],
         "risk_score": record.get("risk_score"),
+        "risk_label": record.get("risk_label", "UNKNOWN"),
         "created_at": record.get("created_at"),
         "completed_at": record.get("completed_at"),
         "finding_count": len(findings),

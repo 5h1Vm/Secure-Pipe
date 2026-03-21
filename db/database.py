@@ -18,10 +18,15 @@ CREATE TABLE IF NOT EXISTS scans (
     input_type  TEXT,
     status      TEXT,
     risk_score  INTEGER,
+    risk_label  TEXT DEFAULT 'UNKNOWN',
     created_at  TEXT,
     completed_at TEXT
 )
 """
+
+_MIGRATE_RISK_LABEL = (
+    "ALTER TABLE scans ADD COLUMN risk_label TEXT DEFAULT 'UNKNOWN'"
+)
 
 _CREATE_FINDINGS = """
 CREATE TABLE IF NOT EXISTS findings (
@@ -46,6 +51,11 @@ async def init_db() -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(_CREATE_SCANS)
         await db.execute(_CREATE_FINDINGS)
+        # Migrate: add risk_label column if it doesn't exist yet.
+        try:
+            await db.execute(_MIGRATE_RISK_LABEL)
+        except Exception:
+            pass  # Column already exists — ignore.
         await db.commit()
 
 
@@ -70,7 +80,8 @@ async def create_scan(scan_id: str, input_str: str, input_type: str) -> None:
 
 
 async def update_scan_status(
-    scan_id: str, status: str, risk_score: int | None = None
+    scan_id: str, status: str, risk_score: int | None = None,
+    risk_label: str | None = None,
 ) -> None:
     """Update the status (and optionally the risk score) of a scan.
 
@@ -78,16 +89,18 @@ async def update_scan_status(
         scan_id: Identifier of the scan to update.
         status: New status string (e.g. ``"running"``, ``"complete"``).
         risk_score: Optional 0-100 risk score to record.
+        risk_label: Optional human-readable risk label (e.g. ``"HIGH"``).
     """
     from datetime import datetime, timezone
 
     now = datetime.now(timezone.utc).isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "UPDATE scans SET status=?, risk_score=?, completed_at=? WHERE id=?",
+            "UPDATE scans SET status=?, risk_score=?, risk_label=?, completed_at=? WHERE id=?",
             (
                 status,
                 risk_score,
+                risk_label,
                 now if status in ("complete", "failed") else None,
                 scan_id,
             ),
@@ -175,7 +188,7 @@ async def get_scan_history(
         List of scan metadata dicts ordered newest-first.
     """
     _select = (
-        "SELECT s.id, s.input_str, s.status, s.risk_score, s.created_at, "
+        "SELECT s.id, s.input_str, s.status, s.risk_score, s.risk_label, s.created_at, "
         "COUNT(f.id) AS finding_count "
         "FROM scans s LEFT JOIN findings f ON f.scan_id = s.id "
     )

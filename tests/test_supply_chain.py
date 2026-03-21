@@ -35,3 +35,42 @@ def test_slopsquat_typosquat() -> None:
     """check_slopsquat flags 'requets' (edit distance 1 from 'requests') as HIGH."""
     findings = check_slopsquat(["requets"])
     assert any(f.severity == SeverityLevel.HIGH for f in findings)
+
+
+@pytest.mark.asyncio
+async def test_osv_clean_package(httpx_mock) -> None:
+    """check_osv returns empty list when OSV API reports no vulnerabilities."""
+    from services.supply_chain import check_osv
+
+    httpx_mock.add_response(
+        method="POST",
+        json={"vulns": []},
+    )
+
+    findings = await check_osv("requests", None, "PyPI")
+    assert findings == []
+
+
+@pytest.mark.asyncio
+async def test_osv_known_vuln(httpx_mock) -> None:
+    """check_osv returns a HIGH finding when OSV reports a known CVE."""
+    from services.supply_chain import check_osv
+
+    httpx_mock.add_response(
+        method="POST",
+        json={
+            "vulns": [
+                {
+                    "id": "GHSA-xxxx-yyyy-zzzz",
+                    "aliases": ["CVE-2023-12345"],
+                    "summary": "Remote code execution in fakelib",
+                    "severity": [],
+                }
+            ]
+        },
+    )
+
+    findings = await check_osv("fakelib", None, "PyPI")
+    assert len(findings) == 1
+    assert findings[0].severity == SeverityLevel.HIGH
+    assert "CVE-2023-12345" in findings[0].cwe

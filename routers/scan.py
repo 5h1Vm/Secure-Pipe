@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from db.database import create_scan, get_scan, get_scan_history, save_findings, update_scan_status
@@ -18,7 +18,7 @@ from schemas.finding import ScanFinding, SeverityLevel
 from schemas.scan import InputType, ScanRequest, ScanResult
 from services.diff_scanner import DiffScanResult, scan_diff
 from services.input_router import detect_input_type
-from services.risk_score import compute_risk_score
+from services.risk_score import RiskResult, compute_risk_score
 from services.mcp_scanner import MCPScanner
 from services.scanners.bandit_scanner import BanditScanner
 from services.scanners.gitleaks_scanner import GitleaksScanner
@@ -28,9 +28,25 @@ from services.supply_chain import check_dependencies, check_slopsquat
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# Global in-memory scan log store: scan_id → list of log lines
+_scan_logs: dict[str, list[str]] = {}
+
+
+def _log(scan_id: str, msg: str) -> None:
+    """Log a message both to the Python logger and the in-memory scan log.
+
+    Args:
+        scan_id: The scan whose log buffer should receive the message.
+        msg: The log message to record.
+    """
+    logger.info(msg)
+    if scan_id in _scan_logs:
+        _scan_logs[scan_id].append(msg)
+
 
 async def _run_scan(scan_id: str, target: str, input_type: InputType) -> None:
     """Background task: run all applicable scanners and persist results."""
+    _scan_logs[scan_id] = []
     await update_scan_status(scan_id, "running")
     findings: list[ScanFinding] = []
     clone_path: str | None = None
@@ -40,7 +56,7 @@ async def _run_scan(scan_id: str, target: str, input_type: InputType) -> None:
             import git
 
             clone_path = f"/tmp/{scan_id}"
-            logger.info("Cloning %s to %s", target, clone_path)
+            _log(scan_id, f"Cloning {target} to {clone_path}")
             git.Repo.clone_from(target, clone_path)
 
             scanners = [
@@ -50,8 +66,10 @@ async def _run_scan(scan_id: str, target: str, input_type: InputType) -> None:
             ]
             for scanner in scanners:
                 try:
+                    _log(scan_id, f"→ Running {scanner.scanner_name}...")
                     results = await scanner.run(clone_path)
                     findings.extend(results)
+                    _log(scan_id, f"✓ {scanner.scanner_name} completed: {len(results)} findings")
                 except Exception:
                     logger.exception(
                         "Scanner %s raised an exception", scanner.scanner_name
@@ -59,6 +77,7 @@ async def _run_scan(scan_id: str, target: str, input_type: InputType) -> None:
 
             # Supply chain: check for abandoned and slopsquatted packages.
             try:
+                _log(scan_id, "→ Running supply chain checks...")
                 sc_findings = await check_dependencies(clone_path)
                 findings.extend(sc_findings)
             except Exception:
@@ -76,8 +95,18 @@ async def _run_scan(scan_id: str, target: str, input_type: InputType) -> None:
                         "supply_chain check_slopsquat raised an exception"
                     )
 
+            # OSV.dev CVE lookup
+            try:
+                _log(scan_id, "→ Running OSV.dev CVE lookup...")
+                from services.supply_chain import check_all_osv
+                osv_findings = await check_all_osv(clone_path)
+                findings.extend(osv_findings)
+                _log(scan_id, f"✓ OSV.dev completed: {len(osv_findings)} findings")
+            except Exception:
+                logger.exception("supply_chain check_all_osv raised an exception")
+
         elif input_type == InputType.MCP_ENDPOINT:
-            logger.info("MCP_ENDPOINT target %s: running MCP scanner", target)
+            _log(scan_id, f"MCP_ENDPOINT target {target}: running MCP scanner")
             try:
                 results = await MCPScanner().run(target)
                 findings.extend(results)
@@ -86,31 +115,35 @@ async def _run_scan(scan_id: str, target: str, input_type: InputType) -> None:
 
         elif input_type == InputType.LIVE_URL:
             # DAST via ZAP comes in phase 3 — return empty findings with a note
-            logger.info(
-                "LIVE_URL target %s: skipping static scanners (ZAP in phase 3)",
-                target,
+            _log(scan_id,
+                f"LIVE_URL target {target}: skipping static scanners (ZAP in phase 3)",
             )
 
         elif input_type == InputType.PACKAGE_NAME:
             # Supply-chain scanning comes in phase 5
-            logger.info(
-                "PACKAGE_NAME target %s: skipping (supply chain in phase 5)", target
-            )
+            _log(scan_id,
+                f"PACKAGE_NAME target {target}: skipping (supply chain in phase 5)")
 
         else:
             # ZIP_UPLOAD, AI_CODE — handled in later phases
-            logger.info(
-                "Input type %s for %s: no scanner implemented yet", input_type, target
-            )
+            _log(scan_id,
+                f"Input type {input_type} for {target}: no scanner implemented yet")
 
         # AI triage: enrich CRITICAL/HIGH findings before scoring
         from services.ai_consensus import triage_all
 
         if findings:
+            _log(scan_id, "→ AI triage...")
             findings = await triage_all(findings)
-        risk_score = compute_risk_score(findings)
+            _log(scan_id, "✓ AI triage completed")
+        risk_result = compute_risk_score(findings)
+        _log(scan_id, f"✓ Scan complete — risk score: {risk_result.score} ({risk_result.label})")
         await save_findings(scan_id, findings)
-        await update_scan_status(scan_id, "complete", risk_score=risk_score)
+        await update_scan_status(
+            scan_id, "complete",
+            risk_score=risk_result.score,
+            risk_label=risk_result.label,
+        )
 
     except Exception:
         logger.exception("Scan %s failed", scan_id)
@@ -162,6 +195,49 @@ async def scan_history(
     return await get_scan_history(input_str=input_str, limit=20)
 
 
+@router.get("/scan/{scan_id}/logs")
+async def scan_logs_ws(websocket: WebSocket, scan_id: str) -> None:
+    """WebSocket endpoint that streams live scan log lines for *scan_id*.
+
+    Sends all buffered log lines immediately after connecting, then polls
+    for new lines every 0.5 s until the scan reaches ``complete`` or
+    ``failed`` status.
+
+    Args:
+        websocket: The WebSocket connection.
+        scan_id: UUID of the scan whose logs to stream.
+    """
+    await websocket.accept()
+    sent = 0
+    try:
+        while True:
+            # Send any new log lines
+            log_lines = _scan_logs.get(scan_id, [])
+            while sent < len(log_lines):
+                await websocket.send_text(log_lines[sent])
+                sent += 1
+
+            # Check if the scan is done
+            record = await get_scan(scan_id)
+            if record and record.get("status") in ("complete", "failed"):
+                # Flush any remaining lines
+                log_lines = _scan_logs.get(scan_id, [])
+                while sent < len(log_lines):
+                    await websocket.send_text(log_lines[sent])
+                    sent += 1
+                break
+
+            await asyncio.sleep(0.5)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        _scan_logs.pop(scan_id, None)
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
 @router.get("/scan/{scan_id}", response_model=ScanResult)
 async def get_scan_result(scan_id: str) -> ScanResult:
     """Return the current status and findings for *scan_id*.
@@ -206,6 +282,69 @@ async def get_scan_result(scan_id: str) -> ScanResult:
             else None
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# File scan endpoint
+# ---------------------------------------------------------------------------
+
+
+@router.post("/scan/file")
+async def scan_file_upload(file: UploadFile) -> dict[str, Any]:
+    """Accept a file upload, run malware and SAST scanning on it.
+
+    Saves the uploaded file to ``/tmp/{scan_id}/uploaded_{filename}``,
+    then runs:
+
+    * MalwareBazaar hash lookup (free, no key required)
+    * VirusTotal hash lookup + submission (requires ``VIRUSTOTAL_API_KEY``)
+    * SemgrepScanner + BanditScanner when the file has a ``.py`` extension
+
+    Args:
+        file: The uploaded file (multipart/form-data ``file`` field).
+
+    Returns:
+        A dict compatible with :class:`~schemas.scan.ScanResult`.
+    """
+    scan_id = str(uuid.uuid4())
+    upload_dir = f"/tmp/{scan_id}"
+    os.makedirs(upload_dir, exist_ok=True)
+
+    filename = file.filename or "uploaded_file"
+    file_path = os.path.join(upload_dir, f"uploaded_{filename}")
+
+    try:
+        content = await file.read()
+        with open(file_path, "wb") as fh:
+            fh.write(content)
+
+        from services.file_scanner import scan_file as _scan_file
+
+        findings: list[ScanFinding] = await _scan_file(file_path)
+
+        # Additional SAST for Python files
+        if filename.endswith(".py"):
+            for scanner in (SemgrepScanner(), BanditScanner()):
+                try:
+                    results = await scanner.run(upload_dir)
+                    findings.extend(results)
+                except Exception:
+                    logger.exception(
+                        "Scanner %s raised an exception on uploaded file",
+                        scanner.scanner_name,
+                    )
+
+        risk_result = compute_risk_score(findings)
+        return {
+            "scan_id": scan_id,
+            "status": "complete",
+            "findings": [f.model_dump() for f in findings],
+            "risk_score": risk_result.score,
+            "risk_label": risk_result.label,
+            "finding_count": len(findings),
+        }
+    finally:
+        shutil.rmtree(upload_dir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
