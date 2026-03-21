@@ -8,12 +8,12 @@ import os
 import shutil
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from db.database import create_scan, get_scan, save_findings, update_scan_status
+from db.database import create_scan, get_scan, get_scan_history, save_findings, update_scan_status
 from schemas.finding import ScanFinding, SeverityLevel
 from schemas.scan import InputType, ScanRequest, ScanResult
 from services.diff_scanner import DiffScanResult, scan_diff
@@ -103,6 +103,11 @@ async def _run_scan(scan_id: str, target: str, input_type: InputType) -> None:
                 "Input type %s for %s: no scanner implemented yet", input_type, target
             )
 
+        # AI triage: enrich CRITICAL/HIGH findings before scoring
+        from services.ai_consensus import triage_all
+
+        if findings:
+            findings = await triage_all(findings)
         risk_score = compute_risk_score(findings)
         await save_findings(scan_id, findings)
         await update_scan_status(scan_id, "complete", risk_score=risk_score)
@@ -139,6 +144,22 @@ async def start_scan(request: ScanRequest) -> dict[str, Any]:
     )
 
     return {"scan_id": scan_id, "status": "queued", "input_type": input_type.value}
+
+
+@router.get("/scan/history")
+async def scan_history(
+    input_str: Optional[str] = Query(default=None),
+) -> list[dict[str, Any]]:
+    """Return the last 20 scans, optionally filtered by *input_str*.
+
+    Args:
+        input_str: When provided, only scans for this target are returned.
+
+    Returns:
+        List of dicts with scan_id, input_str, status, risk_score,
+        finding_count, and created_at.
+    """
+    return await get_scan_history(input_str=input_str, limit=20)
 
 
 @router.get("/scan/{scan_id}", response_model=ScanResult)
