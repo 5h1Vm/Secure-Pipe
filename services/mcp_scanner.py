@@ -247,4 +247,12 @@ class MCPScanner(BaseScanner):
             if tool_name:
                 findings.extend(await self.check_dynamic(target, tool_name))
 
+        from services.injection_detector import scan_for_injection  # noqa: PLC0415
+
+        for tool in tools:
+            injection_findings = await scan_for_injection(
+                tool.get("description", ""), tool["name"], target
+            )
+            findings.extend(injection_findings)
+
         return findings
