@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from db.database import init_db
 from routers import report, scan
@@ -47,3 +50,27 @@ app.include_router(report.router)
 async def health() -> dict[str, str]:
     """Return service health status."""
     return {"status": "ok", "version": "0.1.0"}
+
+
+# ── Frontend (optional — only when frontend/index.html is present) ──────────
+
+_FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "frontend")
+_FRONTEND_INDEX = os.path.join(_FRONTEND_DIR, "index.html")
+
+if os.path.isfile(_FRONTEND_INDEX):
+    app.mount("/static", StaticFiles(directory=_FRONTEND_DIR), name="static")
+
+    @app.get("/")
+    async def serve_frontend() -> FileResponse:
+        """Serve the single-page web dashboard."""
+        return FileResponse(_FRONTEND_INDEX)
+
+
+# ── MCP server exposure (optional — requires fastmcp) ───────────────────────
+
+try:
+    from routers.mcp_tools import mcp
+
+    app.mount("/mcp", mcp.sse_app())
+except Exception:  # noqa: BLE001
+    pass

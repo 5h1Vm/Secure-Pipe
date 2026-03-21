@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SecurePipe — Scan before you run.</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0D1B2A;
+      --surface:   #132237;
+      --border:    #1e3250;
+      --accent:    #6C3FCF;
+      --accent-h:  #8054e0;
+      --text:      #e2e8f0;
+      --muted:     #7b90aa;
+      --red:       #ef4444;
+      --amber:     #f59e0b;
+      --green:     #22c55e;
+      --orange:    #f97316;
+      --yellow:    #eab308;
+      --blue:      #3b82f6;
+      --gray:      #6b7280;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+    }
+
+    /* ── Header ─────────────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem 2rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    header .logo {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: -0.5px;
+    }
+    header .tagline {
+      font-size: 0.9rem;
+      color: var(--muted);
+      font-style: italic;
+    }
+
+    /* ── Main layout ─────────────────────────────────────── */
+    main { max-width: 900px; margin: 0 auto; padding: 2rem 1.5rem; }
+
+    /* ── Input section ───────────────────────────────────── */
+    .scan-box {
+      display: flex;
+      gap: 0.75rem;
+      margin-bottom: 2rem;
+    }
+    .scan-box input {
+      flex: 1;
+      padding: 0.9rem 1.2rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      font-size: 1rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .scan-box input:focus { border-color: var(--accent); }
+    .scan-box button {
+      padding: 0.9rem 2rem;
+      border-radius: 8px;
+      border: none;
+      background: var(--accent);
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+      white-space: nowrap;
+    }
+    .scan-box button:hover { background: var(--accent-h); }
+    .scan-box button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ── Progress section ────────────────────────────────── */
+    #progress-section {
+      display: none;
+      margin-bottom: 2rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.25rem 1.5rem;
+    }
+    .progress-bar-track {
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-bottom: 0.75rem;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 3px;
+      animation: indeterminate 1.6s ease-in-out infinite;
+      width: 40%;
+    }
+    @keyframes indeterminate {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(350%); }
+    }
+    #progress-status { font-size: 0.9rem; color: var(--muted); }
+
+    /* ── Results section ─────────────────────────────────── */
+    #results-section { display: none; }
+
+    /* Risk score */
+    .risk-row {
+      display: flex;
+      align-items: center;
+      gap: 2rem;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+    }
+    .risk-score-block { text-align: center; }
+    .risk-score-num {
+      font-size: 5rem;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .risk-score-label {
+      font-size: 0.8rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    /* Stats */
+    .stats-row {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .badge {
+      display: inline-block;
+      padding: 0.3rem 0.75rem;
+      border-radius: 20px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      background: var(--border);
+      color: var(--text);
+    }
+    .badge.accent { background: var(--accent); color: #fff; }
+
+    /* Findings table */
+    .findings-table-wrap {
+      overflow-x: auto;
+      margin-top: 1.5rem;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+    thead tr {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      padding: 0.7rem 1rem;
+      text-align: left;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      font-size: 0.72rem;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+    }
+    td { padding: 0.65rem 1rem; vertical-align: middle; }
+    tbody tr { border-bottom: 1px solid var(--border); }
+    tbody tr:last-child { border-bottom: none; }
+
+    /* Severity row colours */
+    .sev-CRITICAL td:first-child { border-left: 3px solid var(--red); }
+    .sev-HIGH     td:first-child { border-left: 3px solid var(--orange); }
+    .sev-MEDIUM   td:first-child { border-left: 3px solid var(--yellow); }
+    .sev-LOW      td:first-child { border-left: 3px solid var(--blue); }
+    .sev-INFO     td:first-child { border-left: 3px solid var(--gray); }
+
+    .sev-badge {
+      padding: 0.2rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+    .sev-CRITICAL { background: rgba(239,68,68,0.15);  color: var(--red); }
+    .sev-HIGH     { background: rgba(249,115,22,0.15); color: var(--orange); }
+    .sev-MEDIUM   { background: rgba(234,179,8,0.15);  color: var(--yellow); }
+    .sev-LOW      { background: rgba(59,130,246,0.15); color: var(--blue); }
+    .sev-INFO     { background: rgba(107,114,128,0.15);color: var(--gray); }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: var(--green);
+      font-size: 1.1rem;
+      font-weight: 600;
+    }
+    .empty-state .check { font-size: 2.5rem; margin-bottom: 0.5rem; }
+
+    /* ── History section ─────────────────────────────────── */
+    #history-section { margin-top: 2.5rem; }
+    #history-section h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 0.75rem;
+    }
+    .history-cards { display: flex; flex-direction: column; gap: 0.5rem; }
+    .history-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem 1.1rem;
+      cursor: pointer;
+      transition: border-color 0.2s;
+      gap: 0.75rem;
+    }
+    .history-card:hover { border-color: var(--accent); }
+    .history-card .hc-target {
+      flex: 1;
+      font-size: 0.875rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .history-card .hc-meta {
+      font-size: 0.78rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .history-card .hc-score {
+      font-weight: 700;
+      font-size: 1rem;
+      min-width: 2.5rem;
+      text-align: right;
+    }
+
+    /* ── Error banner ────────────────────────────────────── */
+    #error-banner {
+      display: none;
+      background: rgba(239,68,68,0.1);
+      border: 1px solid var(--red);
+      color: var(--red);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🔒 SecurePipe</div>
+  <div class="tagline">Scan before you run.</div>
+</header>
+
+<main>
+  <!-- Input -->
+  <div class="scan-box">
+    <input id="scan-input" type="text"
+      placeholder="GitHub URL, live URL, MCP server, or package name"
+      autocomplete="off" />
+    <button id="scan-btn" onclick="startScan()">Scan</button>
+  </div>
+
+  <!-- Error -->
+  <div id="error-banner"></div>
+
+  <!-- Progress -->
+  <div id="progress-section">
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill"></div>
+    </div>
+    <div id="progress-status">Initialising…</div>
+  </div>
+
+  <!-- Results -->
+  <div id="results-section">
+    <div class="risk-row">
+      <div class="risk-score-block">
+        <div id="risk-num" class="risk-score-num">—</div>
+        <div class="risk-score-label">Risk Score</div>
+      </div>
+      <div class="stats-row" id="stats-row"></div>
+    </div>
+    <div id="findings-container"></div>
+  </div>
+
+  <!-- History -->
+  <div id="history-section">
+    <h2>Recent Scans</h2>
+    <div class="history-cards" id="history-cards"></div>
+  </div>
+</main>
+
+<script>
+  const API_BASE = "";
+
+  let _pollTimer = null;
+
+  // ── Helpers ────────────────────────────────────────────
+
+  function scoreColor(score) {
+    if (score === null || score === undefined) return "var(--muted)";
+    if (score <= 40)  return "var(--red)";
+    if (score <= 70)  return "var(--amber)";
+    return "var(--green)";
+  }
+
+  function showError(msg) {
+    const el = document.getElementById("error-banner");
+    el.textContent = msg;
+    el.style.display = "block";
+  }
+  function hideError() {
+    document.getElementById("error-banner").style.display = "none";
+  }
+
+  function showProgress(msg) {
+    document.getElementById("progress-section").style.display = "block";
+    document.getElementById("progress-status").textContent = msg;
+    document.getElementById("results-section").style.display = "none";
+  }
+  function hideProgress() {
+    document.getElementById("progress-section").style.display = "none";
+  }
+
+  function statusLabel(status) {
+    const map = { queued: "Queued…", running: "Scanning…", complete: "Complete", failed: "Failed" };
+    return map[status] || status;
+  }
+
+  // ── Scan flow ──────────────────────────────────────────
+
+  async function startScan() {
+    const input = document.getElementById("scan-input").value.trim();
+    if (!input) return;
+
+    hideError();
+    document.getElementById("scan-btn").disabled = true;
+    document.getElementById("results-section").style.display = "none";
+    showProgress("Submitting scan…");
+
+    try {
+      const resp = await fetch(`${API_BASE}/scan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input_str: input }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      pollScan(data.scan_id);
+    } catch (err) {
+      hideProgress();
+      showError(`Scan failed: ${err.message}`);
+      document.getElementById("scan-btn").disabled = false;
+    }
+  }
+
+  function pollScan(scanId) {
+    const phases = ["Cloning…", "Scanning…", "Triaging…"];
+    let tick = 0;
+
+    if (_pollTimer) clearInterval(_pollTimer);
+
+    _pollTimer = setInterval(async () => {
+      try {
+        document.getElementById("progress-status").textContent =
+          phases[tick % phases.length];
+        tick++;
+
+        const resp = await fetch(`${API_BASE}/scan/${scanId}`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+
+        if (data.status !== "queued" && data.status !== "running") {
+          clearInterval(_pollTimer);
+          _pollTimer = null;
+          hideProgress();
+          document.getElementById("scan-btn").disabled = false;
+
+          if (data.status === "complete") {
+            await loadReport(scanId);
+            loadHistory();
+          } else {
+            showError(`Scan ended with status: ${data.status}`);
+          }
+        }
+      } catch (err) {
+        clearInterval(_pollTimer);
+        _pollTimer = null;
+        hideProgress();
+        showError(`Polling error: ${err.message}`);
+        document.getElementById("scan-btn").disabled = false;
+      }
+    }, 2000);
+  }
+
+  // ── Report rendering ───────────────────────────────────
+
+  async function loadReport(scanId) {
+    try {
+      const resp = await fetch(`${API_BASE}/report/${scanId}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      renderReport(data);
+    } catch (err) {
+      showError(`Could not load report: ${err.message}`);
+    }
+  }
+
+  function renderReport(data) {
+    const resultsEl = document.getElementById("results-section");
+    resultsEl.style.display = "block";
+
+    // Risk score
+    const score = data.risk_score;
+    const numEl = document.getElementById("risk-num");
+    numEl.textContent = score !== null && score !== undefined ? score : "—";
+    numEl.style.color = scoreColor(score);
+
+    // Stats row
+    const statsEl = document.getElementById("stats-row");
+    const elapsed = data.created_at && data.completed_at
+      ? Math.round((new Date(data.completed_at) - new Date(data.created_at)) / 1000)
+      : null;
+    statsEl.innerHTML = `
+      <span class="badge accent">${data.finding_count ?? 0} findings</span>
+      ${elapsed !== null ? `<span class="badge">${elapsed}s</span>` : ""}
+      ${data.input_type ? `<span class="badge">${data.input_type}</span>` : ""}
+      <span class="badge">${data.status ?? ""}</span>
+    `;
+
+    // Findings
+    const container = document.getElementById("findings-container");
+    const findings = data.findings || [];
+
+    if (findings.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <div class="check">✅</div>
+          No findings — looking clean
+        </div>`;
+      return;
+    }
+
+    const rows = findings.map(f => {
+      const sev = (f.severity || "INFO").toUpperCase();
+      return `<tr class="sev-${sev}">
+        <td><span class="sev-badge sev-${sev}">${sev}</span></td>
+        <td>${esc(f.tool || "")}</td>
+        <td>${esc(f.title || "")}</td>
+        <td style="font-size:0.78rem;color:var(--muted)">${esc(f.file_path || "")}</td>
+        <td>${f.line_number ?? ""}</td>
+        <td>${esc(f.cwe || "")}</td>
+      </tr>`;
+    }).join("");
+
+    container.innerHTML = `
+      <div class="findings-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Severity</th><th>Tool</th><th>Title</th>
+              <th>File</th><th>Line</th><th>CWE</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  function esc(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  // ── History ────────────────────────────────────────────
+
+  async function loadHistory() {
+    try {
+      const resp = await fetch(`${API_BASE}/scan/history`);
+      if (!resp.ok) return;
+      const items = await resp.json();
+      renderHistory(items.slice(0, 5));
+    } catch (_) {
+      // history is non-critical
+    }
+  }
+
+  function renderHistory(items) {
+    const container = document.getElementById("history-cards");
+    if (!items || items.length === 0) {
+      container.innerHTML = `<div style="color:var(--muted);font-size:0.85rem">No scans yet.</div>`;
+      return;
+    }
+    container.innerHTML = items.map(item => {
+      const score = item.risk_score;
+      return `<div class="history-card" onclick="loadReport('${esc(item.scan_id)}')">
+        <span class="hc-target" title="${esc(item.input_str || "")}">${esc(item.input_str || item.scan_id)}</span>
+        <span class="hc-meta">${esc(item.status || "")}</span>
+        <span class="hc-score" style="color:${scoreColor(score)}">${score !== null && score !== undefined ? score : "—"}</span>
+      </div>`;
+    }).join("");
+  }
+
+  // ── Init ───────────────────────────────────────────────
+
+  document.getElementById("scan-input").addEventListener("keydown", e => {
+    if (e.key === "Enter") startScan();
+  });
+
+  loadHistory();
+</script>
+</body>
+</html>
