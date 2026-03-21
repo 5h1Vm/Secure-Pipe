@@ -4,22 +4,26 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
 import uuid
 from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from db.database import create_scan, get_scan, save_findings, update_scan_status
 from schemas.finding import ScanFinding, SeverityLevel
 from schemas.scan import InputType, ScanRequest, ScanResult
+from services.diff_scanner import DiffScanResult, scan_diff
 from services.input_router import detect_input_type
 from services.risk_score import compute_risk_score
 from services.mcp_scanner import MCPScanner
 from services.scanners.bandit_scanner import BanditScanner
 from services.scanners.gitleaks_scanner import GitleaksScanner
 from services.scanners.semgrep_scanner import SemgrepScanner
+from services.supply_chain import check_dependencies, check_slopsquat
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -51,6 +55,25 @@ async def _run_scan(scan_id: str, target: str, input_type: InputType) -> None:
                 except Exception:
                     logger.exception(
                         "Scanner %s raised an exception", scanner.scanner_name
+                    )
+
+            # Supply chain: check for abandoned and slopsquatted packages.
+            try:
+                sc_findings = await check_dependencies(clone_path)
+                findings.extend(sc_findings)
+            except Exception:
+                logger.exception("supply_chain check_dependencies raised an exception")
+
+            req_file = os.path.join(clone_path, "requirements.txt")
+            if os.path.exists(req_file):
+                try:
+                    from services.supply_chain import _parse_requirements_txt
+
+                    pkgs = _parse_requirements_txt(req_file)
+                    findings.extend(check_slopsquat(pkgs))
+                except Exception:
+                    logger.exception(
+                        "supply_chain check_slopsquat raised an exception"
                     )
 
         elif input_type == InputType.MCP_ENDPOINT:
@@ -162,3 +185,56 @@ async def get_scan_result(scan_id: str) -> ScanResult:
             else None
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Diff scan endpoint
+# ---------------------------------------------------------------------------
+
+
+class DiffScanRequest(BaseModel):
+    """Request body for the diff scan endpoint."""
+
+    repo_url: str
+    base_sha: str
+    head_sha: str
+
+
+@router.post("/scan/diff")
+async def start_diff_scan(request: DiffScanRequest) -> dict[str, Any]:
+    """Clone *repo_url*, check out *head_sha*, and run a diff-aware scan.
+
+    Args:
+        request: Body containing ``repo_url``, ``base_sha``, and ``head_sha``.
+
+    Returns:
+        A dict with classified findings (new, fixed, worsened, existing_count).
+
+    Raises:
+        HTTPException: 500 if the scan fails.
+    """
+    import git as _git
+
+    import tempfile as _tempfile
+
+    scan_id = str(uuid.uuid4())
+    clone_path = os.path.join(_tempfile.gettempdir(), f"diff_clone_{scan_id}")
+    try:
+        logger.info("Cloning %s for diff scan", request.repo_url)
+        _git.Repo.clone_from(request.repo_url, clone_path)
+
+        result: DiffScanResult = await scan_diff(
+            clone_path, request.base_sha, request.head_sha
+        )
+
+        return {
+            "new_findings": [f.model_dump() for f in result.new_findings],
+            "fixed_findings": [f.model_dump() for f in result.fixed_findings],
+            "worsened_findings": [f.model_dump() for f in result.worsened_findings],
+            "existing_count": result.existing_count,
+        }
+    except Exception as exc:
+        logger.exception("Diff scan %s failed", scan_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        shutil.rmtree(clone_path, ignore_errors=True)
