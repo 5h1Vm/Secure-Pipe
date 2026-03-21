@@ -13,3 +13,5 @@ packaging>=24.0
 pytest>=8.0
 pytest-asyncio>=0.23
 anyio>=4.0
+semgrep>=1.70.0
+bandit>=1.7.9
