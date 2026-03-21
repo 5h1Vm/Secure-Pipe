@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+  orchestrator:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file: .env
+    volumes:
+      - .:/app
+
+  # ── Phase 2 scanner containers (to be added) ──────────────────────────────
+  # semgrep:
+  #   image: returntocorp/semgrep:latest
+  #   volumes:
+  #     - .:/src
+  #   command: ["semgrep", "--config=auto", "/src"]
+
+  # zap:
+  #   image: ghcr.io/zaproxy/zaproxy:stable
+  #   ports:
+  #     - "8080:8080"
+
+  # nuclei:
+  #   image: projectdiscovery/nuclei:latest
+  #   volumes:
+  #     - .:/target
+
+  # trivy:
+  #   image: aquasec/trivy:latest
+  #   volumes:
+  #     - .:/project
