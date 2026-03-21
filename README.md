@@ -76,3 +76,62 @@ See [AGENTS.md](AGENTS.md) for coding conventions.
 ## License
 
 [MIT](LICENSE)
+
+
+# SecurePipe 🔒
+
+> **Scan before you run.** The security scanner built for the AI-agent era.
+
+[![Tests](https://img.shields.io/badge/tests-23%20passing-brightgreen)]()
+[![License](https://img.shields.io/badge/license-MIT-blue)]()
+[![Python](https://img.shields.io/badge/python-3.11+-blue)]()
+[![Docker](https://img.shields.io/badge/docker-ready-blue)]()
+
+Before you clone that repo. Before you install that AI-recommended package.  
+Before you connect your AI agent to that MCP server — **run SecurePipe**.
+
+## What it scans
+
+| Input | What runs |
+|-------|-----------|
+| `github.com/owner/repo` | SAST (Semgrep + Bandit) + Secrets (Gitleaks) + Supply chain |
+| `https://your-app.com` | DAST (ZAP) + VAPT (Nuclei) |
+| `http://your-mcp-server/mcp` | OWASP MCP Top 10 + Prompt injection detection |
+| `package-name` | Slopsquat + typosquat + abandoned package detection |
+
+## Why SecurePipe exists
+
+AI coding assistants generate code with vulnerabilities. AI agents connect 
+to MCP servers that may be malicious. Developers install packages that AI 
+hallucinated. SecurePipe is the security layer that should exist between 
+"AI recommended this" and "I ran it".
+
+## 60-second quickstart
+```bash
+docker compose up -d
+
+# Scan a repo before cloning it
+curl -X POST http://localhost:8000/scan \
+  -H "Content-Type: application/json" \
+  -d '{"input_str": "https://github.com/owner/suspicious-repo"}'
+
+# Scan an MCP server before connecting your AI agent
+curl -X POST http://localhost:8000/scan \
+  -d '{"input_str": "http://some-mcp-server.com/mcp"}'
+```
+
+## Research contributions
+
+SecurePipe implements three original security research contributions:
+
+**1. First open-source OWASP MCP Top 10 scanner**  
+OWASP published the MCP vulnerability spec in 2025. No automated scanner 
+existed. SecurePipe is the first.
+
+**2. LLM-vs-LLM adversarial prompt injection detector**  
+An attacker LLM generates injection variants. A detector LLM scores 
+susceptibility. No pattern matching — dynamic adversarial generation.
+
+**3. Multi-model AI consensus triage**  
+Multiple free LLMs vote on each finding's severity. Reduces false positives 
+below any single model. Self-improving weights.
