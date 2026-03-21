@@ -16,6 +16,7 @@ from schemas.finding import ScanFinding, SeverityLevel
 from schemas.scan import InputType, ScanRequest, ScanResult
 from services.input_router import detect_input_type
 from services.risk_score import compute_risk_score
+from services.mcp_scanner import MCPScanner
 from services.scanners.bandit_scanner import BanditScanner
 from services.scanners.gitleaks_scanner import GitleaksScanner
 from services.scanners.semgrep_scanner import SemgrepScanner
@@ -52,6 +53,14 @@ async def _run_scan(scan_id: str, target: str, input_type: InputType) -> None:
                         "Scanner %s raised an exception", scanner.scanner_name
                     )
 
+        elif input_type == InputType.MCP_ENDPOINT:
+            logger.info("MCP_ENDPOINT target %s: running MCP scanner", target)
+            try:
+                results = await MCPScanner().run(target)
+                findings.extend(results)
+            except Exception:
+                logger.exception("MCPScanner raised an exception for %s", target)
+
         elif input_type == InputType.LIVE_URL:
             # DAST via ZAP comes in phase 3 — return empty findings with a note
             logger.info(
@@ -66,7 +75,7 @@ async def _run_scan(scan_id: str, target: str, input_type: InputType) -> None:
             )
 
         else:
-            # ZIP_UPLOAD, MCP_ENDPOINT, AI_CODE — handled in later phases
+            # ZIP_UPLOAD, AI_CODE — handled in later phases
             logger.info(
                 "Input type %s for %s: no scanner implemented yet", input_type, target
             )
