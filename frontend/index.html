@@ -387,21 +387,25 @@
 
     const wsProto = location.protocol === "https:" ? "wss" : "ws";
     const wsHost = location.host || "localhost:8000";
-    _logsWs = new WebSocket(`${wsProto}://${wsHost}/scan/${scanId}/logs`);
+    try {
+      _logsWs = new WebSocket(`${wsProto}://${wsHost}/scan/${scanId}/logs`);
 
-    _logsWs.onmessage = (evt) => {
-      const line = document.createElement("span");
-      line.className = "log-line";
-      line.textContent = evt.data;
-      logEl.appendChild(line);
-      logEl.scrollTop = logEl.scrollHeight;
-    };
-    _logsWs.onerror = () => {
-      _logsWs = null;
-    };
-    _logsWs.onclose = () => {
-      _logsWs = null;
-    };
+      _logsWs.onmessage = (evt) => {
+        const line = document.createElement("span");
+        line.className = "log-line";
+        line.textContent = evt.data;
+        logEl.appendChild(line);
+        requestAnimationFrame(() => { logEl.scrollTop = logEl.scrollHeight; });
+      };
+      _logsWs.onerror = () => {
+        _logsWs = null; // silent fallback — polling will handle completion
+      };
+      _logsWs.onclose = () => {
+        _logsWs = null;
+      };
+    } catch (_) {
+      _logsWs = null; // WS not available, polling will handle completion
+    }
   }
 
   function closeLogStream() {
@@ -425,6 +429,8 @@
     hideError();
     document.getElementById("scan-btn").disabled = true;
     document.getElementById("results-section").style.display = "none";
+    document.getElementById("log-terminal").innerHTML = "";
+    document.getElementById("findings-container").innerHTML = "";
     showProgress("Submitting scan…");
 
     try {
@@ -482,7 +488,7 @@
         showError(`Polling error: ${err.message}`);
         document.getElementById("scan-btn").disabled = false;
       }
-    }, 2000);
+    }, 1000);
   }
 
   // ── Report rendering ───────────────────────────────────
@@ -571,7 +577,7 @@
 
   async function loadHistory() {
     try {
-      const resp = await fetch(`${API_BASE}/scan/history`);
+      const resp = await fetch(`${API_BASE}/scans/history`);
       if (!resp.ok) return;
       const items = await resp.json();
       renderHistory(items.slice(0, 5));

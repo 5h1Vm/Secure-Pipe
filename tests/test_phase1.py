@@ -84,10 +84,10 @@ async def test_serve_frontend():
 
 @pytest.mark.asyncio
 async def test_history_endpoint():
-    """GET /scan/history returns 200 and a list."""
+    """GET /scans/history returns 200 and a list."""
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
-        response = await client.get("/scan/history")
+        response = await client.get("/scans/history")
     assert response.status_code == 200
     assert isinstance(response.json(), list)

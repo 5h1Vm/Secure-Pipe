@@ -56,6 +56,19 @@ async def init_db() -> None:
             await db.execute(_MIGRATE_RISK_LABEL)
         except Exception:
             pass  # Column already exists — ignore.
+        # Backfill any rows where risk_label is still NULL or 'UNKNOWN'.
+        try:
+            await db.execute(
+                "UPDATE scans SET risk_label = CASE "
+                "WHEN risk_score IS NULL THEN 'UNKNOWN' "
+                "WHEN risk_score < 40 THEN 'CRITICAL' "
+                "WHEN risk_score < 60 THEN 'HIGH' "
+                "WHEN risk_score < 80 THEN 'MEDIUM' "
+                "ELSE 'LOW' END "
+                "WHERE risk_label = 'UNKNOWN' OR risk_label IS NULL"
+            )
+        except Exception:
+            pass
         await db.commit()
 
 
