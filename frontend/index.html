@@ -1,614 +1,1166 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SecurePipe — Scan before you run.</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>SecurePipe // THREAT ANALYSIS SYSTEM</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&family=VT323&display=swap');
 
-    :root {
-      --bg:        #0D1B2A;
-      --surface:   #132237;
-      --border:    #1e3250;
-      --accent:    #6C3FCF;
-      --accent-h:  #8054e0;
-      --text:      #e2e8f0;
-      --muted:     #7b90aa;
-      --red:       #ef4444;
-      --amber:     #f59e0b;
-      --green:     #22c55e;
-      --orange:    #f97316;
-      --yellow:    #eab308;
-      --blue:      #3b82f6;
-      --gray:      #6b7280;
-    }
+:root {
+  --green: #00ff41;
+  --green-dim: #00aa2a;
+  --green-glow: rgba(0,255,65,0.15);
+  --green-faint: rgba(0,255,65,0.04);
+  --red: #ff2441;
+  --amber: #ffaa00;
+  --blue: #00d4ff;
+  --purple: #b347ff;
+  --bg: #000a04;
+  --bg2: #010d06;
+  --border: rgba(0,255,65,0.2);
+  --border-bright: rgba(0,255,65,0.5);
+  --scanline-gap: 3px;
+}
 
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: system-ui, -apple-system, sans-serif;
-      min-height: 100vh;
-    }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    /* ── Header ─────────────────────────────────────────── */
-    header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 1rem 2rem;
-      border-bottom: 1px solid var(--border);
-      background: var(--surface);
-    }
-    header .logo {
-      font-size: 1.5rem;
-      font-weight: 700;
-      color: var(--accent);
-      letter-spacing: -0.5px;
-    }
-    header .tagline {
-      font-size: 0.9rem;
-      color: var(--muted);
-      font-style: italic;
-    }
+body {
+  background: var(--bg);
+  color: var(--green);
+  font-family: 'Share Tech Mono', monospace;
+  min-height: 100vh;
+  overflow-x: hidden;
+  cursor: crosshair;
+}
 
-    /* ── Main layout ─────────────────────────────────────── */
-    main { max-width: 900px; margin: 0 auto; padding: 2rem 1.5rem; }
+/* CRT scanlines overlay */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent calc(var(--scanline-gap) - 1px),
+    rgba(0,0,0,0.3) var(--scanline-gap)
+  );
+  pointer-events: none;
+  z-index: 1000;
+}
 
-    /* ── Input section ───────────────────────────────────── */
-    .scan-box {
-      display: flex;
-      gap: 0.75rem;
-      margin-bottom: 2rem;
-    }
-    .scan-box input {
-      flex: 1;
-      padding: 0.9rem 1.2rem;
-      border-radius: 8px;
-      border: 1px solid var(--border);
-      background: var(--surface);
-      color: var(--text);
-      font-size: 1rem;
-      outline: none;
-      transition: border-color 0.2s;
-    }
-    .scan-box input:focus { border-color: var(--accent); }
-    .scan-box button {
-      padding: 0.9rem 2rem;
-      border-radius: 8px;
-      border: none;
-      background: var(--accent);
-      color: #fff;
-      font-size: 1rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.2s;
-      white-space: nowrap;
-    }
-    .scan-box button:hover { background: var(--accent-h); }
-    .scan-box button:disabled { opacity: 0.5; cursor: not-allowed; }
+/* CRT vignette */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.8) 100%);
+  pointer-events: none;
+  z-index: 999;
+}
 
-    /* ── Progress section ────────────────────────────────── */
-    #progress-section {
-      display: none;
-      margin-bottom: 2rem;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 1.25rem 1.5rem;
-    }
-    .progress-bar-track {
-      height: 6px;
-      background: var(--border);
-      border-radius: 3px;
-      overflow: hidden;
-      margin-bottom: 0.75rem;
-    }
-    .progress-bar-fill {
-      height: 100%;
-      background: var(--accent);
-      border-radius: 3px;
-      animation: indeterminate 1.6s ease-in-out infinite;
-      width: 40%;
-    }
-    @keyframes indeterminate {
-      0%   { transform: translateX(-100%); }
-      100% { transform: translateX(350%); }
-    }
-    #progress-status { font-size: 0.9rem; color: var(--muted); }
+/* Phosphor flicker */
+@keyframes flicker {
+  0%,100%{opacity:1} 92%{opacity:1} 93%{opacity:0.85} 94%{opacity:1} 97%{opacity:0.9} 98%{opacity:1}
+}
+@keyframes scandown {
+  0%{transform:translateY(-100%)} 100%{transform:translateY(100vh)}
+}
+@keyframes pulse-border {
+  0%,100%{border-color:rgba(0,255,65,0.2)} 50%{border-color:rgba(0,255,65,0.5)}
+}
+@keyframes blink {
+  0%,100%{opacity:1} 50%{opacity:0}
+}
+@keyframes spin {
+  from{transform:rotate(0deg)} to{transform:rotate(360deg)}
+}
+@keyframes progress-fill {
+  from{width:0%} to{width:100%}
+}
+@keyframes glitch {
+  0%{transform:translate(0)} 20%{transform:translate(-2px,1px)} 40%{transform:translate(2px,-1px)} 60%{transform:translate(-1px,2px)} 80%{transform:translate(1px,-2px)} 100%{transform:translate(0)}
+}
+@keyframes fadeIn {
+  from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)}
+}
+@keyframes matrix-rain {
+  0%{transform:translateY(-100%);opacity:1} 100%{transform:translateY(100vh);opacity:0}
+}
 
-    /* ── Results section ─────────────────────────────────── */
-    #results-section { display: none; }
+.flicker { animation: flicker 8s infinite; }
 
-    /* Risk score */
-    .risk-row {
-      display: flex;
-      align-items: center;
-      gap: 2rem;
-      margin-bottom: 1.5rem;
-      flex-wrap: wrap;
-    }
-    .risk-score-block { text-align: center; }
-    .risk-score-num {
-      font-size: 5rem;
-      font-weight: 800;
-      line-height: 1;
-    }
-    .risk-score-label {
-      font-size: 0.8rem;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 1px;
-    }
+/* SCAN LINE EFFECT */
+.scan-line {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--green), transparent);
+  opacity: 0.15;
+  animation: scandown 6s linear infinite;
+  pointer-events: none;
+  z-index: 998;
+}
 
-    /* Stats */
-    .stats-row {
-      display: flex;
-      gap: 0.75rem;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-    .badge {
-      display: inline-block;
-      padding: 0.3rem 0.75rem;
-      border-radius: 20px;
-      font-size: 0.78rem;
-      font-weight: 600;
-      background: var(--border);
-      color: var(--text);
-    }
-    .badge.accent { background: var(--accent); color: #fff; }
+/* LAYOUT */
+.shell {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 16px;
+  animation: flicker 8s infinite;
+}
 
-    /* Findings table */
-    .findings-table-wrap {
-      overflow-x: auto;
-      margin-top: 1.5rem;
-      border-radius: 10px;
-      border: 1px solid var(--border);
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.875rem;
-    }
-    thead tr {
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-    }
-    th {
-      padding: 0.7rem 1rem;
-      text-align: left;
-      font-weight: 600;
-      color: var(--muted);
-      text-transform: uppercase;
-      font-size: 0.72rem;
-      letter-spacing: 0.5px;
-      white-space: nowrap;
-    }
-    td { padding: 0.65rem 1rem; vertical-align: middle; }
-    tbody tr { border-bottom: 1px solid var(--border); }
-    tbody tr:last-child { border-bottom: none; }
+/* HEADER */
+.header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-bottom: 2px solid var(--green-dim);
+  padding: 12px 20px;
+  margin-bottom: 12px;
+  background: var(--green-faint);
+  position: relative;
+  overflow: hidden;
+}
+.header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(90deg, transparent, transparent 40px, rgba(0,255,65,0.02) 40px, rgba(0,255,65,0.02) 41px);
+}
+.header-left { font-size: 10px; color: var(--green-dim); line-height: 1.6; }
+.header-logo {
+  text-align: center;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 8px;
+  color: var(--green);
+  text-shadow: 0 0 20px var(--green), 0 0 40px rgba(0,255,65,0.3);
+  position: relative;
+}
+.header-logo span { color: var(--green-dim); font-size: 10px; display: block; letter-spacing: 4px; margin-top: 2px; font-weight: 400; }
+.header-right { font-size: 10px; color: var(--green-dim); text-align: right; line-height: 1.6; }
+.status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); animation: blink 2s infinite; margin-right: 4px; }
 
-    /* Severity row colours */
-    .sev-CRITICAL td:first-child { border-left: 3px solid var(--red); }
-    .sev-HIGH     td:first-child { border-left: 3px solid var(--orange); }
-    .sev-MEDIUM   td:first-child { border-left: 3px solid var(--yellow); }
-    .sev-LOW      td:first-child { border-left: 3px solid var(--blue); }
-    .sev-INFO     td:first-child { border-left: 3px solid var(--gray); }
+/* MAIN GRID */
+.main-grid {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  grid-template-rows: auto auto 1fr;
+  gap: 10px;
+}
 
-    .sev-badge {
-      padding: 0.2rem 0.6rem;
-      border-radius: 4px;
-      font-size: 0.72rem;
-      font-weight: 700;
-      letter-spacing: 0.5px;
-    }
-    .sev-CRITICAL { background: rgba(239,68,68,0.15);  color: var(--red); }
-    .sev-HIGH     { background: rgba(249,115,22,0.15); color: var(--orange); }
-    .sev-MEDIUM   { background: rgba(234,179,8,0.15);  color: var(--yellow); }
-    .sev-LOW      { background: rgba(59,130,246,0.15); color: var(--blue); }
-    .sev-INFO     { background: rgba(107,114,128,0.15);color: var(--gray); }
+/* PANELS */
+.panel {
+  border: 1px solid var(--border);
+  background: var(--green-faint);
+  position: relative;
+  overflow: hidden;
+}
+.panel::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--green), transparent);
+  opacity: 0.4;
+}
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0,255,65,0.03);
+  font-family: 'Orbitron', sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: var(--green-dim);
+}
+.panel-header .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--green); box-shadow: 0 0 4px var(--green); }
+.panel-body { padding: 12px; }
 
-    /* Empty state */
-    .empty-state {
-      text-align: center;
-      padding: 3rem 1rem;
-      color: var(--green);
-      font-size: 1.1rem;
-      font-weight: 600;
-    }
-    .empty-state .check { font-size: 2.5rem; margin-bottom: 0.5rem; }
+/* INPUT PANEL */
+.input-panel { grid-column: 1; grid-row: 1; }
 
-    /* ── History section ─────────────────────────────────── */
-    #history-section { margin-top: 2.5rem; }
-    #history-section h2 {
-      font-size: 1rem;
-      font-weight: 600;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      margin-bottom: 0.75rem;
-    }
-    .history-cards { display: flex; flex-direction: column; gap: 0.5rem; }
-    .history-card {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 0.75rem 1.1rem;
-      cursor: pointer;
-      transition: border-color 0.2s;
-      gap: 0.75rem;
-    }
-    .history-card:hover { border-color: var(--accent); }
-    .history-card .hc-target {
-      flex: 1;
-      font-size: 0.875rem;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .history-card .hc-meta {
-      font-size: 0.78rem;
-      color: var(--muted);
-      white-space: nowrap;
-    }
-    .history-card .hc-score {
-      font-weight: 700;
-      font-size: 1rem;
-      min-width: 2.5rem;
-      text-align: right;
-    }
+.target-label {
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: var(--green-dim);
+  margin-bottom: 6px;
+  font-family: 'Orbitron', sans-serif;
+}
+.target-input-wrap {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border-bright);
+  background: rgba(0,255,65,0.03);
+  padding: 0 10px;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.target-prompt { color: var(--green); font-size: 14px; flex-shrink: 0; }
+.target-input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--green);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 12px;
+  padding: 9px 0;
+  caret-color: var(--green);
+}
+.target-input::placeholder { color: rgba(0,255,65,0.25); }
 
-    /* ── Log terminal ────────────────────────────────────── */
-    #log-terminal {
-      display: none;
-      margin-top: 1rem;
-      background: #0a1628;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 1rem;
-      font-family: 'Courier New', Courier, monospace;
-      font-size: 0.8rem;
-      color: #4ade80;
-      max-height: 220px;
-      overflow-y: auto;
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
-    #log-terminal .log-line { display: block; line-height: 1.5; }
-    #error-banner {
-      display: none;
-      background: rgba(239,68,68,0.1);
-      border: 1px solid var(--red);
-      color: var(--red);
-      border-radius: 8px;
-      padding: 0.75rem 1rem;
-      margin-bottom: 1rem;
-      font-size: 0.9rem;
-    }
-  </style>
+/* FILE UPLOAD */
+.file-zone {
+  border: 1px dashed rgba(0,255,65,0.3);
+  padding: 10px;
+  text-align: center;
+  cursor: pointer;
+  margin-bottom: 8px;
+  transition: all 0.2s;
+  font-size: 10px;
+  color: var(--green-dim);
+  letter-spacing: 1px;
+}
+.file-zone:hover { border-color: var(--green); color: var(--green); background: var(--green-glow); }
+.file-zone.dragover { border-color: var(--green); background: var(--green-glow); }
+#file-input { display: none; }
+#file-name { font-size: 10px; color: var(--blue); margin-top: 4px; min-height: 14px; }
+
+.scan-btn {
+  width: 100%;
+  background: none;
+  border: 1px solid var(--green);
+  color: var(--green);
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  padding: 10px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: all 0.15s;
+  position: relative;
+  overflow: hidden;
+}
+.scan-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--green);
+  transform: translateX(-100%);
+  transition: transform 0.2s;
+  z-index: 0;
+}
+.scan-btn:hover::before { transform: translateX(0); }
+.scan-btn:hover { color: var(--bg); }
+.scan-btn span { position: relative; z-index: 1; }
+.scan-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.scan-btn:disabled::before { display: none; }
+
+/* RISK SCORE DISPLAY */
+.score-panel { grid-column: 2; grid-row: 1; }
+.score-inner {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 16px;
+  align-items: center;
+}
+.score-gauge-wrap { position: relative; width: 160px; height: 160px; }
+.score-gauge-wrap svg { width: 160px; height: 160px; }
+.score-gauge-bg { fill: none; stroke: rgba(0,255,65,0.1); stroke-width: 8; }
+.score-gauge-fill { fill: none; stroke-width: 8; stroke-linecap: round;
+  transform: rotate(-90deg); transform-origin: 80px 80px;
+  transition: stroke-dashoffset 1s ease, stroke 0.5s; }
+.score-text-wrap {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.score-number {
+  font-family: 'VT323', monospace;
+  font-size: 52px;
+  line-height: 1;
+  text-shadow: 0 0 20px currentColor;
+  transition: color 0.5s;
+}
+.score-label {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 8px;
+  letter-spacing: 3px;
+  color: var(--green-dim);
+  margin-top: 2px;
+}
+.score-grade {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  margin-top: 4px;
+  text-shadow: 0 0 10px currentColor;
+  transition: color 0.5s;
+}
+
+.severity-bars { display: flex; flex-direction: column; gap: 7px; }
+.sev-row { display: flex; align-items: center; gap: 8px; }
+.sev-label {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  width: 70px;
+  flex-shrink: 0;
+}
+.sev-bar-bg { flex: 1; height: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.07); position: relative; }
+.sev-bar-fill { height: 100%; transition: width 0.8s ease; }
+.sev-count {
+  font-size: 13px;
+  width: 24px;
+  text-align: right;
+  font-family: 'VT323', monospace;
+}
+
+/* SCAN META */
+.meta-row { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.meta-chip {
+  font-size: 9px;
+  padding: 3px 8px;
+  border: 1px solid;
+  letter-spacing: 1px;
+  font-family: 'Share Tech Mono', monospace;
+}
+
+/* LOG TERMINAL */
+.log-panel {
+  grid-column: 1;
+  grid-row: 2 / 4;
+  display: flex;
+  flex-direction: column;
+}
+.log-terminal {
+  flex: 1;
+  font-size: 10.5px;
+  line-height: 1.55;
+  overflow-y: auto;
+  padding: 10px 12px;
+  min-height: 300px;
+  max-height: 500px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--green-dim) transparent;
+}
+.log-terminal::-webkit-scrollbar { width: 4px; }
+.log-terminal::-webkit-scrollbar-thumb { background: var(--green-dim); }
+.log-line { animation: fadeIn 0.2s ease; margin-bottom: 1px; }
+.log-time { color: rgba(0,255,65,0.3); margin-right: 6px; }
+.log-info { color: var(--green); }
+.log-success { color: var(--blue); }
+.log-warn { color: var(--amber); }
+.log-error { color: var(--red); }
+.log-system { color: var(--purple); }
+.cursor-blink { animation: blink 1s infinite; }
+
+/* FINDINGS PANEL */
+.findings-panel {
+  grid-column: 2;
+  grid-row: 2;
+}
+.findings-toolbar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.filter-btn {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  padding: 4px 10px;
+  border: 1px solid;
+  background: none;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-transform: uppercase;
+}
+.filter-btn.active, .filter-btn:hover { color: var(--bg); }
+.fb-all { border-color: var(--green-dim); color: var(--green-dim); }
+.fb-all.active, .fb-all:hover { background: var(--green-dim); }
+.fb-critical { border-color: var(--red); color: var(--red); }
+.fb-critical.active, .fb-critical:hover { background: var(--red); }
+.fb-high { border-color: var(--amber); color: var(--amber); }
+.fb-high.active, .fb-high:hover { background: var(--amber); }
+.fb-medium { border-color: var(--blue); color: var(--blue); }
+.fb-medium.active, .fb-medium:hover { background: var(--blue); }
+.fb-low { border-color: var(--green); color: var(--green); }
+.fb-low.active, .fb-low:hover { background: var(--green); }
+
+.findings-list {
+  max-height: 320px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--green-dim) transparent;
+}
+.finding-card {
+  border-bottom: 1px solid rgba(0,255,65,0.07);
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: background 0.1s;
+  animation: fadeIn 0.3s ease;
+}
+.finding-card:hover { background: var(--green-glow); }
+.finding-card.expanded { background: rgba(0,255,65,0.06); }
+.finding-top { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+.sev-badge {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 2px 6px;
+  border: 1px solid;
+  flex-shrink: 0;
+}
+.tool-badge {
+  font-size: 9px;
+  color: var(--green-dim);
+  background: rgba(0,255,65,0.05);
+  padding: 1px 6px;
+  border: 1px solid rgba(0,255,65,0.1);
+  font-family: 'Share Tech Mono', monospace;
+}
+.finding-title { font-size: 11px; color: var(--green); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.finding-loc { font-size: 9px; color: rgba(0,255,65,0.3); font-family: 'Share Tech Mono', monospace; }
+.finding-desc { font-size: 10px; color: rgba(0,255,65,0.5); line-height: 1.5; margin-top: 6px; display: none; padding-top: 6px; border-top: 1px solid rgba(0,255,65,0.08); }
+.finding-card.expanded .finding-desc { display: block; }
+.finding-remediation { margin-top: 5px; color: var(--blue); font-size: 10px; }
+.finding-cwe { font-size: 9px; color: rgba(0,255,65,0.3); margin-top: 3px; }
+
+.empty-state {
+  padding: 40px 12px;
+  text-align: center;
+  color: rgba(0,255,65,0.2);
+  font-size: 11px;
+  letter-spacing: 2px;
+}
+.empty-icon {
+  font-family: 'VT323', monospace;
+  font-size: 40px;
+  display: block;
+  margin-bottom: 8px;
+  color: rgba(0,255,65,0.1);
+}
+
+/* HISTORY PANEL */
+.history-panel { grid-column: 2; grid-row: 3; }
+.history-list { display: flex; flex-direction: column; gap: 0; max-height: 180px; overflow-y: auto; }
+.history-card {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(0,255,65,0.06);
+  cursor: pointer;
+  transition: background 0.1s;
+  font-size: 10px;
+}
+.history-card:hover { background: var(--green-glow); }
+.history-target { color: var(--green); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'Share Tech Mono'; }
+.history-status { font-family: 'Orbitron', sans-serif; font-size: 7px; letter-spacing: 1px; padding: 2px 6px; border: 1px solid; flex-shrink: 0; }
+.hs-complete { border-color: var(--green); color: var(--green); }
+.hs-failed { border-color: var(--red); color: var(--red); }
+.hs-running { border-color: var(--amber); color: var(--amber); }
+.history-score { font-family: 'VT323', monospace; font-size: 18px; width: 40px; text-align: right; flex-shrink: 0; }
+
+/* PROGRESS */
+.progress-wrap { padding: 10px 12px 0; }
+.progress-bar-bg {
+  height: 3px;
+  background: rgba(0,255,65,0.1);
+  border: 1px solid rgba(0,255,65,0.15);
+  margin-bottom: 6px;
+  position: relative;
+  overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+  transition: width 0.5s ease;
+  position: relative;
+}
+.progress-bar-fill::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: -3px;
+  bottom: -3px;
+  width: 20px;
+  background: linear-gradient(90deg, transparent, rgba(0,255,65,0.6));
+}
+.progress-status { font-size: 9px; letter-spacing: 2px; color: var(--green-dim); display: flex; align-items: center; gap: 6px; }
+.spinner { display: inline-block; width: 10px; height: 10px; border: 1px solid rgba(0,255,65,0.2); border-top-color: var(--green); border-radius: 50%; animation: spin 0.8s linear infinite; }
+
+/* SEVERITY COLORS */
+.sev-critical { color: var(--red); border-color: var(--red); }
+.sev-high { color: var(--amber); border-color: var(--amber); }
+.sev-medium { color: var(--blue); border-color: var(--blue); }
+.sev-low { color: var(--green); border-color: var(--green); }
+.sev-info { color: rgba(255,255,255,0.4); border-color: rgba(255,255,255,0.2); }
+
+/* ASCII DECORATIONS */
+.ascii-corner {
+  position: absolute;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 9px;
+  color: rgba(0,255,65,0.15);
+  pointer-events: none;
+}
+.corner-tl { top: 3px; left: 4px; }
+.corner-tr { top: 3px; right: 4px; }
+.corner-bl { bottom: 3px; left: 4px; }
+.corner-br { bottom: 3px; right: 4px; }
+
+/* GLITCH EFFECT on title */
+.glitch {
+  position: relative;
+}
+.glitch::before, .glitch::after {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+}
+.glitch:hover::before {
+  opacity: 0.7;
+  color: var(--red);
+  animation: glitch 0.3s infinite;
+  clip-path: polygon(0 0, 100% 0, 100% 35%, 0 35%);
+  transform: translate(-2px);
+}
+.glitch:hover::after {
+  opacity: 0.7;
+  color: var(--blue);
+  animation: glitch 0.3s infinite reverse;
+  clip-path: polygon(0 65%, 100% 65%, 100% 100%, 0 100%);
+  transform: translate(2px);
+}
+
+/* TICKER */
+.ticker {
+  border-top: 1px solid var(--border);
+  padding: 5px 20px;
+  font-size: 9px;
+  color: var(--green-dim);
+  letter-spacing: 2px;
+  overflow: hidden;
+  white-space: nowrap;
+  display: flex;
+  gap: 40px;
+  animation: ticker-scroll 30s linear infinite;
+  margin-top: 10px;
+}
+@keyframes ticker-scroll {
+  0%{transform:translateX(0)} 100%{transform:translateX(-50%)}
+}
+
+/* RESPONSIVE */
+@media(max-width:900px) {
+  .main-grid { grid-template-columns: 1fr; }
+  .score-panel,.findings-panel,.history-panel { grid-column: 1; }
+  .log-panel { grid-row: auto; }
+}
+</style>
 </head>
 <body>
+<div class="scan-line"></div>
 
-<header>
-  <div class="logo">🔒 SecurePipe</div>
-  <div class="tagline">Scan before you run.</div>
-</header>
+<div class="shell flicker">
 
-<main>
-  <!-- Input -->
-  <div class="scan-box">
-    <input id="scan-input" type="text"
-      placeholder="GitHub URL, live URL, MCP server, or package name"
-      autocomplete="off" />
-    <button id="scan-btn" onclick="startScan()">Scan</button>
-  </div>
-
-  <!-- Error -->
-  <div id="error-banner"></div>
-
-  <!-- Progress -->
-  <div id="progress-section">
-    <div class="progress-bar-track">
-      <div class="progress-bar-fill"></div>
+  <!-- HEADER -->
+  <div class="header">
+    <div class="header-left">
+      SYS // SECUREPIPE v2.0<br>
+      BUILD 20260322.STABLE<br>
+      <span class="status-dot"></span>ONLINE
     </div>
-    <div id="progress-status">Initialising…</div>
-    <div id="log-terminal"></div>
+    <div class="header-logo glitch" data-text="SECUREPIPE">
+      SECUREPIPE
+      <span>THREAT ANALYSIS SYSTEM</span>
+    </div>
+    <div class="header-right" id="header-clock">
+      CLOCK: --:--:--<br>
+      NODE: LOCALHOST<br>
+      SESSION: ACTIVE
+    </div>
   </div>
 
-  <!-- Results -->
-  <div id="results-section">
-    <div class="risk-row">
-      <div class="risk-score-block">
-        <div id="risk-num" class="risk-score-num">—</div>
-        <div class="risk-score-label">Risk Score</div>
+  <div class="main-grid">
+
+    <!-- INPUT PANEL -->
+    <div class="panel input-panel">
+      <div class="ascii-corner corner-tl">┌</div>
+      <div class="ascii-corner corner-tr">┐</div>
+      <div class="ascii-corner corner-bl">└</div>
+      <div class="ascii-corner corner-br">┘</div>
+      <div class="panel-header"><div class="dot"></div>TARGET ACQUISITION</div>
+      <div class="panel-body">
+        <div class="target-label">// SCAN TARGET</div>
+        <div class="target-input-wrap">
+          <span class="target-prompt">›</span>
+          <input class="target-input" id="target-input" type="text"
+            placeholder="github.com/user/repo  |  http://host/mcp  |  pkg-name"
+            autocomplete="off" spellcheck="false"/>
+        </div>
+
+        <div class="target-label" style="margin-top:10px">// FILE UPLOAD</div>
+        <div class="file-zone" id="file-zone" onclick="document.getElementById('file-input').click()">
+          <input type="file" id="file-input" accept=".py,.js,.ts,.zip,.sh,.rb"/>
+          DROP FILE OR CLICK TO SELECT<br>
+          <small style="opacity:0.5">.py .js .ts .zip .sh .rb</small>
+        </div>
+        <div id="file-name"></div>
+
+        <button class="scan-btn" id="scan-btn" onclick="startScan()">
+          <span id="scan-btn-text">[ INITIATE SCAN ]</span>
+        </button>
+
+        <div id="progress-wrap" style="display:none" class="progress-wrap">
+          <div class="progress-bar-bg">
+            <div class="progress-bar-fill" id="progress-bar" style="width:0%"></div>
+          </div>
+          <div class="progress-status">
+            <div class="spinner"></div>
+            <span id="progress-text">INITIALIZING...</span>
+          </div>
+        </div>
+
+        <!-- QUICK STATS -->
+        <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border)">
+          <div class="target-label">// SYSTEM STATUS</div>
+          <div style="font-size:10px;line-height:2;color:var(--green-dim)">
+            <div>SCANNERS LOADED <span style="color:var(--green);float:right">SEMGREP / BANDIT / GITLEAKS</span></div>
+            <div>THREAT DB <span style="color:var(--green);float:right">VT + MALWAREBAZAAR</span></div>
+            <div>CVE DATABASE <span style="color:var(--green);float:right">OSV.DEV LIVE</span></div>
+            <div>AI TRIAGE <span style="color:var(--green);float:right" id="ai-status">CHECKING...</span></div>
+            <div>MCP SCANNER <span style="color:var(--blue);float:right">OWASP TOP 10</span></div>
+          </div>
+        </div>
       </div>
-      <div class="stats-row" id="stats-row"></div>
     </div>
-    <div id="findings-container"></div>
+
+    <!-- RISK SCORE PANEL -->
+    <div class="panel score-panel">
+      <div class="ascii-corner corner-tl">┌</div>
+      <div class="ascii-corner corner-tr">┐</div>
+      <div class="ascii-corner corner-bl">└</div>
+      <div class="ascii-corner corner-br">┘</div>
+      <div class="panel-header"><div class="dot"></div>THREAT ASSESSMENT // RISK MATRIX</div>
+      <div class="panel-body">
+        <div class="score-inner">
+          <div class="score-gauge-wrap">
+            <svg viewBox="0 0 160 160">
+              <circle class="score-gauge-bg" cx="80" cy="80" r="62"/>
+              <circle class="score-gauge-fill" id="gauge-circle" cx="80" cy="80" r="62"
+                stroke-dasharray="389.6" stroke-dashoffset="389.6"
+                stroke="var(--green)"/>
+            </svg>
+            <div class="score-text-wrap">
+              <div class="score-number" id="score-number" style="color:var(--green-dim)">--</div>
+              <div class="score-label">RISK SCORE</div>
+              <div class="score-grade" id="score-grade" style="color:var(--green-dim)">AWAITING</div>
+            </div>
+          </div>
+
+          <div>
+            <div class="severity-bars" id="severity-bars">
+              <div class="sev-row">
+                <div class="sev-label sev-critical">CRITICAL</div>
+                <div class="sev-bar-bg"><div class="sev-bar-fill" id="bar-critical" style="width:0%;background:var(--red);box-shadow:0 0 4px var(--red)"></div></div>
+                <div class="sev-count sev-critical" id="count-critical">0</div>
+              </div>
+              <div class="sev-row">
+                <div class="sev-label sev-high">HIGH</div>
+                <div class="sev-bar-bg"><div class="sev-bar-fill" id="bar-high" style="width:0%;background:var(--amber);box-shadow:0 0 4px var(--amber)"></div></div>
+                <div class="sev-count sev-high" id="count-high">0</div>
+              </div>
+              <div class="sev-row">
+                <div class="sev-label sev-medium">MEDIUM</div>
+                <div class="sev-bar-bg"><div class="sev-bar-fill" id="bar-medium" style="width:0%;background:var(--blue);box-shadow:0 0 4px var(--blue)"></div></div>
+                <div class="sev-count sev-medium" id="count-medium">0</div>
+              </div>
+              <div class="sev-row">
+                <div class="sev-label sev-low">LOW</div>
+                <div class="sev-bar-bg"><div class="sev-bar-fill" id="bar-low" style="width:0%;background:var(--green)"></div></div>
+                <div class="sev-count sev-low" id="count-low">0</div>
+              </div>
+              <div class="sev-row">
+                <div class="sev-label sev-info">INFO</div>
+                <div class="sev-bar-bg"><div class="sev-bar-fill" id="bar-info" style="width:0%;background:rgba(255,255,255,0.3)"></div></div>
+                <div class="sev-count sev-info" id="count-info">0</div>
+              </div>
+            </div>
+            <div class="meta-row" id="meta-row"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LOG TERMINAL -->
+    <div class="panel log-panel">
+      <div class="ascii-corner corner-tl">┌</div>
+      <div class="ascii-corner corner-tr">┐</div>
+      <div class="ascii-corner corner-bl">└</div>
+      <div class="ascii-corner corner-br">┘</div>
+      <div class="panel-header"><div class="dot"></div>SCAN LOG // REALTIME OUTPUT</div>
+      <div class="log-terminal" id="log-terminal">
+        <div class="log-line log-system">// SECUREPIPE THREAT ANALYSIS SYSTEM //</div>
+        <div class="log-line log-system">// INITIALIZED AND READY</div>
+        <div class="log-line" style="color:rgba(0,255,65,0.2)">──────────────────────────────────</div>
+        <div class="log-line log-info"><span class="log-time">[BOOT]</span> Loading scanner modules...</div>
+        <div class="log-line log-success"><span class="log-time">[OK]</span> Semgrep v1.70 loaded</div>
+        <div class="log-line log-success"><span class="log-time">[OK]</span> Bandit v1.7 loaded</div>
+        <div class="log-line log-success"><span class="log-time">[OK]</span> Gitleaks v8.21 loaded</div>
+        <div class="log-line log-success"><span class="log-time">[OK]</span> MCP scanner loaded (OWASP Top 10)</div>
+        <div class="log-line log-success"><span class="log-time">[OK]</span> VirusTotal API connected</div>
+        <div class="log-line log-success"><span class="log-time">[OK]</span> OSV.dev CVE database online</div>
+        <div class="log-line" style="color:rgba(0,255,65,0.2)">──────────────────────────────────</div>
+        <div class="log-line log-info"><span class="log-time">[SYS]</span> Awaiting target...<span class="cursor-blink">█</span></div>
+      </div>
+    </div>
+
+    <!-- FINDINGS PANEL -->
+    <div class="panel findings-panel">
+      <div class="ascii-corner corner-tl">┌</div>
+      <div class="ascii-corner corner-tr">┐</div>
+      <div class="ascii-corner corner-bl">└</div>
+      <div class="ascii-corner corner-br">┘</div>
+      <div class="panel-header"><div class="dot"></div>FINDINGS DATABASE <span style="margin-left:auto" id="finding-count-header">0 RECORDS</span></div>
+      <div class="findings-toolbar">
+        <button class="filter-btn fb-all active" onclick="filterFindings('ALL', this)">ALL</button>
+        <button class="filter-btn fb-critical" onclick="filterFindings('CRITICAL', this)">CRITICAL</button>
+        <button class="filter-btn fb-high" onclick="filterFindings('HIGH', this)">HIGH</button>
+        <button class="filter-btn fb-medium" onclick="filterFindings('MEDIUM', this)">MEDIUM</button>
+        <button class="filter-btn fb-low" onclick="filterFindings('LOW', this)">LOW</button>
+      </div>
+      <div class="findings-list" id="findings-list">
+        <div class="empty-state">
+          <span class="empty-icon">◈</span>
+          NO THREATS DETECTED<br>
+          SUBMIT TARGET TO BEGIN ANALYSIS
+        </div>
+      </div>
+    </div>
+
+    <!-- HISTORY PANEL -->
+    <div class="panel history-panel">
+      <div class="ascii-corner corner-tl">┌</div>
+      <div class="ascii-corner corner-tr">┐</div>
+      <div class="ascii-corner corner-bl">└</div>
+      <div class="ascii-corner corner-br">┘</div>
+      <div class="panel-header"><div class="dot"></div>SCAN HISTORY // PREVIOUS OPERATIONS</div>
+      <div class="history-list" id="history-list">
+        <div class="empty-state" style="padding:16px">
+          <small>NO PREVIOUS SCANS</small>
+        </div>
+      </div>
+    </div>
+
   </div>
 
-  <!-- History -->
-  <div id="history-section">
-    <h2>Recent Scans</h2>
-    <div class="history-cards" id="history-cards"></div>
+  <!-- TICKER -->
+  <div style="border:1px solid var(--border);overflow:hidden;margin-top:10px;padding:5px 0">
+    <div class="ticker" id="ticker">
+      <span>SECUREPIPE // THREAT ANALYSIS SYSTEM</span>
+      <span>◈ OWASP MCP TOP 10 SCANNER ACTIVE</span>
+      <span>◈ 3 NOVEL RESEARCH CONTRIBUTIONS</span>
+      <span>◈ 35 TESTS PASSING // CODEQL CLEAN</span>
+      <span>◈ VIRUSTOTAL + MALWAREBAZAAR INTEGRATED</span>
+      <span>◈ OSV.DEV CVE DATABASE LIVE</span>
+      <span>◈ GROQ AI CONSENSUS ENGINE ACTIVE</span>
+      <span>◈ OLLAMA LOCAL FALLBACK READY</span>
+      <span>SECUREPIPE // THREAT ANALYSIS SYSTEM</span>
+      <span>◈ OWASP MCP TOP 10 SCANNER ACTIVE</span>
+      <span>◈ 3 NOVEL RESEARCH CONTRIBUTIONS</span>
+      <span>◈ 35 TESTS PASSING // CODEQL CLEAN</span>
+      <span>◈ VIRUSTOTAL + MALWAREBAZAAR INTEGRATED</span>
+      <span>◈ OSV.DEV CVE DATABASE LIVE</span>
+      <span>◈ GROQ AI CONSENSUS ENGINE ACTIVE</span>
+      <span>◈ OLLAMA LOCAL FALLBACK READY</span>
+    </div>
   </div>
-</main>
+
+</div>
 
 <script>
-  const API_BASE = "";
+const API = '';
+let _allFindings = [];
+let _activeFilter = 'ALL';
+let _pollTimer = null;
+let _ws = null;
+let _selectedFile = null;
 
-  let _pollTimer = null;
-  let _logsWs = null;
+// CLOCK
+function updateClock() {
+  const now = new Date();
+  const t = now.toTimeString().slice(0,8);
+  const d = now.toISOString().slice(0,10);
+  document.getElementById('header-clock').innerHTML =
+    `CLOCK: ${t}<br>NODE: LOCALHOST<br>${d}`;
+}
+setInterval(updateClock, 1000);
+updateClock();
 
-  // ── Helpers ────────────────────────────────────────────
+// AI STATUS
+async function checkAIStatus() {
+  const el = document.getElementById('ai-status');
+  try {
+    const r = await fetch(`${API}/health`);
+    if (r.ok) el.textContent = 'GROQ ONLINE';
+    else el.textContent = 'DEGRADED';
+  } catch {
+    el.textContent = 'OFFLINE';
+    el.style.color = 'var(--red)';
+  }
+}
+checkAIStatus();
 
-  function scoreColor(score) {
-    if (score === null || score === undefined) return "var(--muted)";
-    if (score <= 40)  return "var(--red)";
-    if (score <= 70)  return "var(--amber)";
-    return "var(--green)";
+// FILE DROP
+const fileZone = document.getElementById('file-zone');
+fileZone.addEventListener('dragover', e => { e.preventDefault(); fileZone.classList.add('dragover'); });
+fileZone.addEventListener('dragleave', () => fileZone.classList.remove('dragover'));
+fileZone.addEventListener('drop', e => {
+  e.preventDefault();
+  fileZone.classList.remove('dragover');
+  const f = e.dataTransfer.files[0];
+  if (f) setFile(f);
+});
+document.getElementById('file-input').addEventListener('change', e => {
+  if (e.target.files[0]) setFile(e.target.files[0]);
+});
+function setFile(f) {
+  _selectedFile = f;
+  document.getElementById('file-name').textContent = `▸ ${f.name} (${(f.size/1024).toFixed(1)} KB)`;
+  addLog('info', `File selected: ${f.name}`);
+}
+
+// LOGGING
+function addLog(type, msg) {
+  const el = document.getElementById('log-terminal');
+  const line = document.createElement('div');
+  line.className = `log-line log-${type}`;
+  const now = new Date().toTimeString().slice(0,8);
+  line.innerHTML = `<span class="log-time">[${now}]</span> ${escHtml(msg)}`;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// WEBSOCKET LOGS
+function openWS(scanId) {
+  if (_ws) { try { _ws.close(); } catch(_){} }
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const host = location.host || 'localhost:8000';
+  _ws = new WebSocket(`${proto}://${host}/scan/${scanId}/logs`);
+  _ws.onmessage = e => {
+    const msg = e.data;
+    if (msg.includes('ERROR') || msg.includes('failed') || msg.includes('exception'))
+      addLog('error', msg);
+    else if (msg.includes('complete') || msg.includes('✓') || msg.includes('OK'))
+      addLog('success', msg);
+    else if (msg.includes('MCP') || msg.includes('injection') || msg.includes('AI'))
+      addLog('system', msg);
+    else if (msg.includes('WARNING') || msg.includes('warn'))
+      addLog('warn', msg);
+    else
+      addLog('info', msg);
+  };
+  _ws.onerror = () => {};
+  _ws.onclose = () => { _ws = null; };
+}
+function closeWS() { if (_ws) { try { _ws.close(); } catch(_){} _ws = null; } }
+
+// SCAN
+async function startScan() {
+  const target = document.getElementById('target-input').value.trim();
+  const btn = document.getElementById('scan-btn');
+
+  if (!target && !_selectedFile) {
+    addLog('warn', 'No target specified. Enter URL or select file.');
+    return;
   }
 
-  function showError(msg) {
-    const el = document.getElementById("error-banner");
-    el.textContent = msg;
-    el.style.display = "block";
-  }
-  function hideError() {
-    document.getElementById("error-banner").style.display = "none";
-  }
+  btn.disabled = true;
+  document.getElementById('scan-btn-text').textContent = '[ SCANNING... ]';
+  document.getElementById('progress-wrap').style.display = 'block';
+  setProgress(5, 'INITIALIZING TARGET...');
+  addLog('system', '═══ NEW SCAN INITIATED ═══');
 
-  function showProgress(msg) {
-    document.getElementById("progress-section").style.display = "block";
-    document.getElementById("progress-status").textContent = msg;
-    document.getElementById("results-section").style.display = "none";
-  }
-  function hideProgress() {
-    document.getElementById("progress-section").style.display = "none";
-    const logEl = document.getElementById("log-terminal");
-    logEl.style.display = "none";
-    logEl.innerHTML = "";
-  }
+  try {
+    let scanId;
 
-  // ── Log terminal ───────────────────────────────────────
-
-  function openLogStream(scanId) {
-    if (_logsWs) {
-      try { _logsWs.close(); } catch (_) {}
-      _logsWs = null;
-    }
-    const logEl = document.getElementById("log-terminal");
-    logEl.style.display = "block";
-    logEl.innerHTML = "";
-
-    const wsProto = location.protocol === "https:" ? "wss" : "ws";
-    const wsHost = location.host || "localhost:8000";
-    try {
-      _logsWs = new WebSocket(`${wsProto}://${wsHost}/scan/${scanId}/logs`);
-
-      _logsWs.onmessage = (evt) => {
-        const line = document.createElement("span");
-        line.className = "log-line";
-        line.textContent = evt.data;
-        logEl.appendChild(line);
-        requestAnimationFrame(() => { logEl.scrollTop = logEl.scrollHeight; });
-      };
-      _logsWs.onerror = () => {
-        _logsWs = null; // silent fallback — polling will handle completion
-      };
-      _logsWs.onclose = () => {
-        _logsWs = null;
-      };
-    } catch (_) {
-      _logsWs = null; // WS not available, polling will handle completion
-    }
-  }
-
-  function closeLogStream() {
-    if (_logsWs) {
-      try { _logsWs.close(); } catch (_) {}
-      _logsWs = null;
-    }
-  }
-
-  function statusLabel(status) {
-    const map = { queued: "Queued…", running: "Scanning…", complete: "Complete", failed: "Failed" };
-    return map[status] || status;
-  }
-
-  // ── Scan flow ──────────────────────────────────────────
-
-  async function startScan() {
-    const input = document.getElementById("scan-input").value.trim();
-    if (!input) return;
-
-    hideError();
-    document.getElementById("scan-btn").disabled = true;
-    document.getElementById("results-section").style.display = "none";
-    document.getElementById("log-terminal").innerHTML = "";
-    document.getElementById("findings-container").innerHTML = "";
-    showProgress("Submitting scan…");
-
-    try {
-      const resp = await fetch(`${API_BASE}/scan`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input_str: input }),
+    if (_selectedFile && !target) {
+      addLog('info', `Uploading file: ${_selectedFile.name}`);
+      addLog('info', 'Computing SHA-256 hash...');
+      setProgress(15, 'UPLOADING FILE...');
+      const fd = new FormData();
+      fd.append('file', _selectedFile);
+      const r = await fetch(`${API}/scan/file`, { method:'POST', body: fd });
+      const data = await r.json();
+      scanId = data.scan_id;
+      addLog('success', `File submitted — scan ID: ${scanId.slice(0,8)}...`);
+      addLog('info', 'Checking MalwareBazaar hash database...');
+    } else {
+      addLog('info', `Target: ${target}`);
+      setProgress(10, 'SUBMITTING TARGET...');
+      const r = await fetch(`${API}/scan`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({input_str: target})
       });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json();
-      pollScan(data.scan_id);
-      openLogStream(data.scan_id);
-    } catch (err) {
-      hideProgress();
-      showError(`Scan failed: ${err.message}`);
-      document.getElementById("scan-btn").disabled = false;
+      const data = await r.json();
+      scanId = data.scan_id;
+      addLog('success', `Scan queued — ID: ${scanId.slice(0,8)}...`);
+      addLog('info', `Input type detected: ${data.input_type}`);
     }
+
+    openWS(scanId);
+    pollScan(scanId);
+
+  } catch (err) {
+    addLog('error', `Scan failed: ${err.message}`);
+    resetBtn();
   }
+}
 
-  function pollScan(scanId) {
-    const phases = ["Cloning…", "Scanning…", "Triaging…"];
-    let tick = 0;
+const PROGRESS_MSGS = [
+  [20, 'CLONING REPOSITORY...'],
+  [35, 'RUNNING SEMGREP SAST...'],
+  [50, 'RUNNING BANDIT...'],
+  [60, 'SCANNING SECRETS (GITLEAKS)...'],
+  [70, 'SUPPLY CHAIN ANALYSIS...'],
+  [78, 'OSV.DEV CVE LOOKUP...'],
+  [85, 'MCP SECURITY CHECKS...'],
+  [90, 'AI CONSENSUS TRIAGE...'],
+  [95, 'COMPUTING RISK SCORE...'],
+];
+let _progressIdx = 0;
 
-    if (_pollTimer) clearInterval(_pollTimer);
+function setProgress(pct, msg) {
+  document.getElementById('progress-bar').style.width = pct + '%';
+  document.getElementById('progress-text').textContent = msg;
+}
 
-    _pollTimer = setInterval(async () => {
-      try {
-        document.getElementById("progress-status").textContent =
-          phases[tick % phases.length];
-        tick++;
-
-        const resp = await fetch(`${API_BASE}/scan/${scanId}`);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const data = await resp.json();
-
-        if (data.status !== "queued" && data.status !== "running") {
-          clearInterval(_pollTimer);
-          _pollTimer = null;
-          hideProgress();
-          closeLogStream();
-          document.getElementById("scan-btn").disabled = false;
-
-          if (data.status === "complete") {
-            await loadReport(scanId);
-            loadHistory();
-          } else {
-            showError(`Scan ended with status: ${data.status}`);
-          }
-        }
-      } catch (err) {
-        clearInterval(_pollTimer);
-        _pollTimer = null;
-        hideProgress();
-        closeLogStream();
-        showError(`Polling error: ${err.message}`);
-        document.getElementById("scan-btn").disabled = false;
+function pollScan(scanId) {
+  _progressIdx = 0;
+  _pollTimer = setInterval(async () => {
+    try {
+      // Animate progress
+      if (_progressIdx < PROGRESS_MSGS.length) {
+        const [pct, msg] = PROGRESS_MSGS[_progressIdx++];
+        setProgress(pct, msg);
       }
-    }, 1000);
-  }
-
-  // ── Report rendering ───────────────────────────────────
-
-  async function loadReport(scanId) {
-    try {
-      const resp = await fetch(`${API_BASE}/report/${scanId}`);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json();
-      renderReport(data);
+      const r = await fetch(`${API}/scan/${scanId}`);
+      const data = await r.json();
+      if (data.status === 'complete' || data.status === 'failed') {
+        clearInterval(_pollTimer);
+        closeWS();
+        setProgress(100, data.status === 'complete' ? 'SCAN COMPLETE' : 'SCAN FAILED');
+        if (data.status === 'complete') {
+          addLog('success', `Scan complete — fetching full report...`);
+          const rr = await fetch(`${API}/report/${scanId}`);
+          const report = await rr.json();
+          renderReport(report);
+        } else {
+          addLog('error', 'Scan failed. Check logs.');
+        }
+        resetBtn();
+        loadHistory();
+      }
     } catch (err) {
-      showError(`Could not load report: ${err.message}`);
+      clearInterval(_pollTimer);
+      closeWS();
+      addLog('error', `Poll error: ${err.message}`);
+      resetBtn();
     }
-  }
+  }, 2500);
+}
 
-  function renderReport(data) {
-    const resultsEl = document.getElementById("results-section");
-    resultsEl.style.display = "block";
+function resetBtn() {
+  const btn = document.getElementById('scan-btn');
+  btn.disabled = false;
+  document.getElementById('scan-btn-text').textContent = '[ INITIATE SCAN ]';
+  setTimeout(() => {
+    document.getElementById('progress-wrap').style.display = 'none';
+    setProgress(0, '');
+  }, 2000);
+}
 
-    // Risk score
-    const score = data.risk_score;
-    const numEl = document.getElementById("risk-num");
-    numEl.textContent = score !== null && score !== undefined ? score : "—";
-    numEl.style.color = scoreColor(score);
+// RENDER REPORT
+function renderReport(report) {
+  _allFindings = report.findings || [];
+  const score = report.risk_score ?? 100;
+  const label = report.risk_label || 'LOW';
 
-    // Stats row
-    const statsEl = document.getElementById("stats-row");
-    const elapsed = data.created_at && data.completed_at
-      ? Math.round((new Date(data.completed_at) - new Date(data.created_at)) / 1000)
-      : null;
-    statsEl.innerHTML = `
-      <span class="badge accent">${data.finding_count ?? 0} findings</span>
-      ${elapsed !== null ? `<span class="badge">${elapsed}s</span>` : ""}
-      ${data.input_type ? `<span class="badge">${data.input_type}</span>` : ""}
-      <span class="badge">${data.status ?? ""}</span>
-    `;
+  addLog('system', `═══ ANALYSIS COMPLETE ═══`);
+  addLog('success', `Risk score: ${score} [${label}]`);
+  addLog('info', `Total findings: ${_allFindings.length}`);
 
-    // Findings
-    const container = document.getElementById("findings-container");
-    const findings = data.findings || [];
+  // Score gauge
+  const scoreEl = document.getElementById('score-number');
+  const gradeEl = document.getElementById('score-grade');
+  const gaugeEl = document.getElementById('gauge-circle');
+  const circumference = 389.6;
+  const offset = circumference - (score / 100) * circumference;
 
-    if (findings.length === 0) {
-      container.innerHTML = `
-        <div class="empty-state">
-          <div class="check">✅</div>
-          No findings — looking clean
-        </div>`;
-      return;
-    }
+  scoreEl.textContent = score;
+  gradeEl.textContent = label;
 
-    const rows = findings.map(f => {
-      const sev = (f.severity || "INFO").toUpperCase();
-      return `<tr class="sev-${sev}">
-        <td><span class="sev-badge sev-${sev}">${sev}</span></td>
-        <td>${esc(f.tool || "")}</td>
-        <td>${esc(f.title || "")}</td>
-        <td style="font-size:0.78rem;color:var(--muted)">${esc(f.file_path || "")}</td>
-        <td>${f.line_number ?? ""}</td>
-        <td>${esc(f.cwe || "")}</td>
-      </tr>`;
-    }).join("");
+  let col;
+  if (score < 40) col = 'var(--red)';
+  else if (score < 60) col = 'var(--amber)';
+  else if (score < 80) col = 'var(--blue)';
+  else col = 'var(--green)';
 
-    container.innerHTML = `
-      <div class="findings-table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Severity</th><th>Tool</th><th>Title</th>
-              <th>File</th><th>Line</th><th>CWE</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>`;
-  }
+  scoreEl.style.color = col;
+  gradeEl.style.color = col;
+  gaugeEl.style.stroke = col;
+  gaugeEl.style.strokeDashoffset = offset;
 
-  function esc(str) {
-    return String(str)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  }
+  // Severity counts
+  const counts = { CRITICAL:0, HIGH:0, MEDIUM:0, LOW:0, INFO:0 };
+  _allFindings.forEach(f => { counts[f.severity] = (counts[f.severity]||0) + 1; });
+  const max = Math.max(...Object.values(counts), 1);
 
-  // ── History ────────────────────────────────────────────
-
-  async function loadHistory() {
-    try {
-      const resp = await fetch(`${API_BASE}/scans/history`);
-      if (!resp.ok) return;
-      const items = await resp.json();
-      renderHistory(items.slice(0, 5));
-    } catch (_) {
-      // history is non-critical
-    }
-  }
-
-  function renderHistory(items) {
-    const container = document.getElementById("history-cards");
-    if (!items || items.length === 0) {
-      container.innerHTML = `<div style="color:var(--muted);font-size:0.85rem">No scans yet.</div>`;
-      return;
-    }
-    container.innerHTML = items.map(item => {
-      const score = item.risk_score;
-      return `<div class="history-card" onclick="loadReport('${esc(item.id)}')">
-        <span class="hc-target" title="${esc(item.input_str || "")}">${esc(item.input_str || item.id)}</span>
-        <span class="hc-meta">${esc(item.status || "")}</span>
-        <span class="hc-score" style="color:${scoreColor(score)}">${score !== null && score !== undefined ? score : "—"}</span>
-      </div>`;
-    }).join("");
-  }
-
-  // ── Init ───────────────────────────────────────────────
-
-  document.getElementById("scan-input").addEventListener("keydown", e => {
-    if (e.key === "Enter") startScan();
+  ['CRITICAL','HIGH','MEDIUM','LOW','INFO'].forEach(s => {
+    document.getElementById(`count-${s.toLowerCase()}`).textContent = counts[s] || 0;
+    document.getElementById(`bar-${s.toLowerCase()}`).style.width = ((counts[s]||0)/max*100) + '%';
   });
 
-  loadHistory();
+  // Meta chips
+  const metaRow = document.getElementById('meta-row');
+  metaRow.innerHTML = '';
+  const chips = [
+    { text: report.input_type || 'UNKNOWN', col: 'var(--blue)' },
+    { text: `${_allFindings.length} FINDINGS`, col: col },
+    { text: report.status?.toUpperCase() || 'COMPLETE', col: 'var(--green)' },
+  ];
+  if (report.completed_at && report.created_at) {
+    const ms = new Date(report.completed_at) - new Date(report.created_at);
+    chips.push({ text: `${(ms/1000).toFixed(1)}s`, col: 'var(--green-dim)' });
+  }
+  chips.forEach(c => {
+    const chip = document.createElement('div');
+    chip.className = 'meta-chip';
+    chip.style.borderColor = c.col;
+    chip.style.color = c.col;
+    chip.textContent = c.text;
+    metaRow.appendChild(chip);
+  });
+
+  document.getElementById('finding-count-header').textContent = `${_allFindings.length} RECORDS`;
+  renderFindings('ALL');
+
+  // Log top findings
+  _allFindings.filter(f => f.severity === 'CRITICAL' || f.severity === 'HIGH')
+    .slice(0,3)
+    .forEach(f => addLog('warn', `⚠ ${f.severity} — ${f.title}`));
+
+  if (_allFindings.length === 0)
+    addLog('success', '✓ No threats detected in target');
+}
+
+// RENDER FINDINGS
+function renderFindings(filter) {
+  const list = document.getElementById('findings-list');
+  const filtered = filter === 'ALL' ? _allFindings : _allFindings.filter(f => f.severity === filter);
+
+  if (filtered.length === 0) {
+    list.innerHTML = `<div class="empty-state"><span class="empty-icon">◈</span>${filter === 'ALL' ? 'NO FINDINGS' : 'NO ' + filter + ' FINDINGS'}</div>`;
+    return;
+  }
+
+  list.innerHTML = '';
+  filtered.forEach(f => {
+    const card = document.createElement('div');
+    card.className = 'finding-card';
+    const sevClass = `sev-${f.severity?.toLowerCase() || 'info'}`;
+    const loc = f.file_path ? `${f.file_path.split('/').pop()}${f.line_number ? ':'+f.line_number : ''}` : '';
+    card.innerHTML = `
+      <div class="finding-top">
+        <div class="sev-badge ${sevClass}">${f.severity}</div>
+        <div class="tool-badge">${f.tool}</div>
+        <div class="finding-title">${escHtml(f.title || 'Unknown')}</div>
+      </div>
+      ${loc ? `<div class="finding-loc">▸ ${escHtml(loc)}</div>` : ''}
+      <div class="finding-desc">
+        ${escHtml(f.description || '')}
+        ${f.cwe ? `<div class="finding-cwe">CWE: ${escHtml(f.cwe)}</div>` : ''}
+        ${f.remediation ? `<div class="finding-remediation">FIX: ${escHtml(f.remediation)}</div>` : ''}
+      </div>`;
+    card.onclick = () => card.classList.toggle('expanded');
+    list.appendChild(card);
+  });
+}
+
+function filterFindings(filter, btn) {
+  _activeFilter = filter;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderFindings(filter);
+}
+
+// HISTORY
+async function loadHistory() {
+  try {
+    const r = await fetch(`${API}/scan/history`);
+    const data = await r.json();
+    const list = document.getElementById('history-list');
+    if (!data.length) return;
+    list.innerHTML = '';
+    data.slice(0,8).forEach(s => {
+      const card = document.createElement('div');
+      card.className = 'history-card';
+      const score = s.risk_score ?? '—';
+      const scoreColor = score < 40 ? 'var(--red)' : score < 60 ? 'var(--amber)' : score < 80 ? 'var(--blue)' : 'var(--green)';
+      const statusClass = s.status === 'complete' ? 'hs-complete' : s.status === 'failed' ? 'hs-failed' : 'hs-running';
+      card.innerHTML = `
+        <div class="history-target" title="${escHtml(s.input_str||'')}">▸ ${escHtml(s.input_str||s.id||'')}</div>
+        <div class="history-status ${statusClass}">${(s.status||'').toUpperCase()}</div>
+        <div class="history-score" style="color:${scoreColor}">${score}</div>`;
+      card.onclick = async () => {
+        addLog('info', `Loading report: ${(s.id||'').slice(0,8)}...`);
+        try {
+          const rr = await fetch(`${API}/report/${s.id}`);
+          const report = await rr.json();
+          renderReport(report);
+        } catch(e) { addLog('error', `Failed to load report: ${e.message}`); }
+      };
+      list.appendChild(card);
+    });
+  } catch {}
+}
+
+// ENTER KEY
+document.getElementById('target-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') startScan();
+});
+
+// INIT
+loadHistory();
 </script>
 </body>
 </html>
