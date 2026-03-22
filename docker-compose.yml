@@ -1,11 +1,15 @@
 services:
   orchestrator:
     build: .
+    container_name: secure-pipe-orchestrator-1
     ports:
       - "8000:8000"
-    env_file: .env
+    env_file:
+      - .env
     volumes:
-      - .:/app
+      - ./data:/app/data
+    environment:
+      - DB_PATH=/app/data/securepipe.db
 
   # ── Phase 2 scanner containers (to be added) ──────────────────────────────
   # semgrep:
