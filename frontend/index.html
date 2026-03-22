@@ -966,6 +966,7 @@ function setProgress(pct, msg) {
 
 function pollScan(scanId) {
   _progressIdx = 0;
+  if (_pollTimer) clearInterval(_pollTimer);
   _pollTimer = setInterval(async () => {
     try {
       // Animate progress
@@ -1097,12 +1098,12 @@ function renderFindings(filter) {
   filtered.forEach(f => {
     const card = document.createElement('div');
     card.className = 'finding-card';
-    const sevClass = `sev-${f.severity?.toLowerCase() || 'info'}`;
+    const sevClass = `sev-${(f.severity?.toLowerCase() || 'info').replace(/[^a-z0-9]/g, '-')}`;
     const loc = f.file_path ? `${f.file_path.split('/').pop()}${f.line_number ? ':'+f.line_number : ''}` : '';
     card.innerHTML = `
       <div class="finding-top">
-        <div class="sev-badge ${sevClass}">${f.severity}</div>
-        <div class="tool-badge">${f.tool}</div>
+        <div class="sev-badge ${sevClass}">${escHtml(f.severity || '')}</div>
+        <div class="tool-badge">${escHtml(f.tool || '')}</div>
         <div class="finding-title">${escHtml(f.title || 'Unknown')}</div>
       </div>
       ${loc ? `<div class="finding-loc">▸ ${escHtml(loc)}</div>` : ''}
@@ -1134,13 +1135,16 @@ async function loadHistory() {
     data.slice(0,8).forEach(s => {
       const card = document.createElement('div');
       card.className = 'history-card';
-      const score = s.risk_score ?? '—';
-      const scoreColor = score < 40 ? 'var(--red)' : score < 60 ? 'var(--amber)' : score < 80 ? 'var(--blue)' : 'var(--green)';
+      const score = s.risk_score;
+      const scoreColor = typeof score === 'number'
+        ? (score < 40 ? 'var(--red)' : score < 60 ? 'var(--amber)' : score < 80 ? 'var(--blue)' : 'var(--green)')
+        : 'var(--green-dim)';
+      const scoreDisplay = typeof score === 'number' ? score : '—';
       const statusClass = s.status === 'complete' ? 'hs-complete' : s.status === 'failed' ? 'hs-failed' : 'hs-running';
       card.innerHTML = `
         <div class="history-target" title="${escHtml(s.input_str||'')}">▸ ${escHtml(s.input_str||s.id||'')}</div>
         <div class="history-status ${statusClass}">${(s.status||'').toUpperCase()}</div>
-        <div class="history-score" style="color:${scoreColor}">${score}</div>`;
+        <div class="history-score" style="color:${scoreColor}">${scoreDisplay}</div>`;
       card.onclick = async () => {
         addLog('info', `Loading report: ${(s.id||'').slice(0,8)}...`);
         try {
