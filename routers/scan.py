@@ -179,7 +179,7 @@ async def start_scan(request: ScanRequest) -> dict[str, Any]:
     return {"scan_id": scan_id, "status": "queued", "input_type": input_type.value}
 
 
-@router.get("/scans/history")
+@router.get("/scan/history")
 async def scan_history(
     input_str: Optional[str] = Query(default=None),
 ) -> list[dict[str, Any]]:
